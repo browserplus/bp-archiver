@@ -60,14 +60,6 @@ using namespace bp::file;
 using namespace bplus::service;
 namespace bfs = boost::filesystem;
 
-typedef enum {
-    eNone,
-    eDeflate,
-    eGZip,
-    eBZip2,
-    eXz
-} tCompression;
-
 class Archiver : public Service
 {
 public:
@@ -159,24 +151,21 @@ ADD_BP_METHOD(Archiver, archive,
 ADD_BP_METHOD_ARG(archive, "files", List, true,
                   "A list of filehandles to be added to the archive.")
 
-// XXX document "appropriate"
 ADD_BP_METHOD_ARG(archive, "archiveFileName", String, false,
                   "Filename for resulting archive file.  An appropriate "
-                  "suffix will be appended if necessary.")
+                  "suffix will be appended if necessary, as documented "
+                  "under the 'format' argument.")
 
 ADD_BP_METHOD_ARG(archive, "followLinks", Boolean, false, 
                   "If true, symbolic links will be followed, otherwise "
                   "the link itself will be archived.  Default is false.  "
                   "For broken symbolic links, the link itself is archived.  "
                   "Links are never archived on Windows.")
-
-// XXX compression/format combos
 ADD_BP_METHOD_ARG(archive, "format", String, true, 
-                  "Archive format, either 'zip' or 'tar'.")
-ADD_BP_METHOD_ARG(archive, "compression", String, false, 
-                  "Compression format, can be 'none', 'deflate', "
-                  "'gzip', 'bzip2, 'xz'.  Default is 'none'.")
-
+                  "Archive format, one of 'zip', 'zip-uncompressed', 'tar', "
+                  "'tar-gzip', 'tar-bzip2', or 'tar-xz'.  The archiveFileName "
+                  "suffixes will be '.zip', '.zip', '.tar.gz', "
+                  "'.tar.bz2', and '.tar.xz' respectively.")
 ADD_BP_METHOD_ARG(archive, "progressCallback", CallBack, false,
                   "An optional progress callback which is passed an "
                   "object with the following key: (percent, an integer).  "
@@ -274,47 +263,8 @@ Archiver::archive(const Transaction& tran,
             m_paths.push_back(path);
         }
         
-        // compression, optional
-        tCompression compressionType = eNone;
-        string compression("none");
-        (void) args.getString("compression", compression);
-        if (compression == "none") {
-            compressionType = eNone;
-        } else if (compression == "deflate") {
-            compressionType = eDeflate;
-        } else if (compression == "gzip") {
-            compressionType = eGZip;
-        } else if (compression == "bzip2") {
-            compressionType = eBZip2;
-        } else if (compression == "Xz") {
-            compressionType = eXz;
-        } else {
-            throw string("invalid compression parameter");
-        }
-
-        // format, required
-        // zip can only do none or deflate, tar cannot do deflate
-        string format;
-        if (!args.getString("format", format)) {
-            throw string("required format parameter missing");
-        }
-        if (format == "zip") {
-            if (compressionType != eNone && compressionType != eDeflate) {
-                throw string("invalid format/compression combination");
-            }
-        } else if (format == "tar") {
-            if (compressionType == eDeflate) {
-                throw string("invalid format/compression combination");
-            }
-#ifndef WIN32
-            m_canArchiveSymlinks = true;
-#endif
-        } else {
-            throw string("invalid format parameter");
-        }
-
         // archiveFileName, optional.  ignore any leading directories 
-        // and force an appropriate extension
+        // and force an appropriate extension in format handling code below
         string archiveFileName;
         if (args.getString("archiveFileName", archiveFileName)) {
             Path p(archiveFileName);
@@ -323,25 +273,53 @@ Archiver::archive(const Transaction& tran,
             Path p = getTempPath(m_tempDir, "ArchiverService_");
             m_archivePath = p;
         }
-        if (format == "zip") {
+
+        // format, required
+        string format;
+        if (!args.getString("format", format)) {
+            throw string("required format parameter missing");
+        }
+        typedef enum {
+            eNone,
+            eDeflate,
+            eGZip,
+            eBZip2,
+            eXz
+        } tCompression;
+        tCompression compression = eNone;
+        if (format == "zip") { 
+            m_canArchiveSymlinks = false;
+            compression = eDeflate;
+            m_archivePath.replace_extension(nativeFromUtf8(".zip"));
+        } else if (format == "zip-uncompressed") {
+            m_canArchiveSymlinks = false;
+            compression = eNone;
             m_archivePath.replace_extension(nativeFromUtf8(".zip"));
         } else if (format == "tar") {
-            switch (compressionType) {
-            case eNone:
-                m_archivePath.replace_extension(nativeFromUtf8(".tar"));
-                break;
-            case eGZip:
-                m_archivePath.replace_extension(nativeFromUtf8(".tar.gz"));
-                break;
-            case eBZip2:
-                m_archivePath.replace_extension(nativeFromUtf8(".tar.bz2"));
-                break;
-            case eXz:
-                m_archivePath.replace_extension(nativeFromUtf8(".tar.xz"));
-                break;
-            }
+            m_canArchiveSymlinks = true;
+            compression = eNone;
+            m_archivePath.replace_extension(nativeFromUtf8(".tar"));
+        } else if (format == "tar-gzip") {
+            m_canArchiveSymlinks = true;
+            compression = eGZip;
+            m_archivePath.replace_extension(nativeFromUtf8(".tar.gz"));
+        } else if (format == "tar-bzip2") {
+            m_canArchiveSymlinks = true;
+            compression = eBZip2;
+            m_archivePath.replace_extension(nativeFromUtf8(".tar.bz2"));
+        } else if (format == "tar-xz") {
+            m_canArchiveSymlinks = true;
+            compression = eXz;
+            m_archivePath.replace_extension(nativeFromUtf8(".tar.xz"));
+        } else {
+            throw string("invalid format parameter");
         }
-        
+
+        // sorry, no support for archiving symlinks on doze
+#ifdef WIN32
+        m_canArchiveSymlinks = false;
+#endif
+
         // followLinks, optional. 
         args.getBool("followLinks", m_followLinks);
 
@@ -359,24 +337,24 @@ Archiver::archive(const Transaction& tran,
         if (m_archive == NULL) {
             throw string("archive_write_new() failed");
         }
-        if (format == "zip") {
+        if (format.find("zip") == 0) {
             if (archive_write_set_format_zip(m_archive)) {
                 throw string("unable to set archive format");
             }
             string c = "zip:compression=";
-            c += compressionType == eDeflate ? "deflate" : "store";
+            c += compression == eDeflate ? "deflate" : "store";
             if (archive_write_set_format_options(m_archive, c.c_str())) {
                 throw string("unable to set archive options: " + c);
             }
             if (archive_write_set_compression_none(m_archive)) {
                 throw string("unable to set compression");
             }
-        } if (format == "tar") {
+        } if (format.find("tar") == 0) {
             if (archive_write_set_format_ustar(m_archive)) {
                 throw string("unable to set archive format");
             }
             int res = 0;
-            switch (compressionType) {
+            switch (compression) {
             case eNone:
                 res = archive_write_set_compression_none(m_archive);
                 break;

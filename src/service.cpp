@@ -595,32 +595,35 @@ Archiver::writeFile(const Path& fullPath,
                 m_bytesProcessed++;  // dirs have a faux size of 1
                 sendProgress();
             } else {
-                // now write file data
-                unsigned char buf[ARCHIVE_BUF_SIZE];
-                bfs::ifstream fstream;
-                fstream.open(fullPath, ios::binary);
-                if (!fstream.good()) {
-                    throw string("unable to open '" + fullPath.utf8() + "'");
-                }
-                for (;;) {
-                    fstream.read((char*)buf, ARCHIVE_BUF_SIZE);
-                    size_t rd = fstream.gcount();
-                    if (rd > 0) {
-                        size_t wt = archive_write_data(m_archive,
-                                                       (void*)buf, rd);
-                        if (wt != rd) {
-                            throw string("archive write error");
-                        }
-                        if (m_progressCallback) {
-                            m_bytesProcessed += wt;
-                            sendProgress();
-                        }
+                // now write file data if this isn't a 
+                // symlink that was handled above
+                if (!isSymlink) {
+                    unsigned char buf[ARCHIVE_BUF_SIZE];
+                    bfs::ifstream fstream;
+                    fstream.open(fullPath, ios::binary);
+                    if (!fstream.good()) {
+                        throw string("unable to open '" + fullPath.utf8() + "'");
                     }
-                    if (fstream.eof()) {
-                        break;
-                    }
-                    if (fstream.fail()) {
-                        throw string("stream read error");
+                    for (;;) {
+                        fstream.read((char*)buf, ARCHIVE_BUF_SIZE);
+                        size_t rd = fstream.gcount();
+                        if (rd > 0) {
+                            size_t wt = archive_write_data(m_archive,
+                                                           (void*)buf, rd);
+                            if (wt != rd) {
+                                throw string("archive write error");
+                            }
+                            if (m_progressCallback) {
+                                m_bytesProcessed += wt;
+                                sendProgress();
+                            }
+                        }
+                        if (fstream.eof()) {
+                            break;
+                        }
+                        if (fstream.fail()) {
+                            throw string("stream read error");
+                        }
                     }
                 }
             }

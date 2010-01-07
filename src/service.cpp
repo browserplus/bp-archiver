@@ -150,22 +150,20 @@ ADD_BP_METHOD(Archiver, archive,
               "resulting archive file.")
 ADD_BP_METHOD_ARG(archive, "files", List, true,
                   "A list of filehandles to be added to the archive.")
-
+ADD_BP_METHOD_ARG(archive, "format", String, true, 
+                  "Archive format, one of 'zip', 'zip-uncompressed', 'tar', "
+                  "'tar-gzip', or 'tar-bzip2'.  The archiveFileName "
+                  "suffixes will be '.zip', '.zip', '.tar.gz', "
+                  "and '.tar.bz2' respectively.")
 ADD_BP_METHOD_ARG(archive, "archiveFileName", String, false,
                   "Filename for resulting archive file.  An appropriate "
                   "suffix will be appended if necessary, as documented "
                   "under the 'format' argument.")
-
 ADD_BP_METHOD_ARG(archive, "followLinks", Boolean, false, 
                   "If true, symbolic links will be followed, otherwise "
                   "the link itself will be archived.  Default is false.  "
                   "For broken symbolic links, the link itself is archived.  "
                   "Links are never archived on Windows.")
-ADD_BP_METHOD_ARG(archive, "format", String, true, 
-                  "Archive format, one of 'zip', 'zip-uncompressed', 'tar', "
-                  "'tar-gzip', 'tar-bzip2', or 'tar-xz'.  The archiveFileName "
-                  "suffixes will be '.zip', '.zip', '.tar.gz', "
-                  "'.tar.bz2', and '.tar.xz' respectively.")
 ADD_BP_METHOD_ARG(archive, "progressCallback", CallBack, false,
                   "An optional progress callback which is passed an "
                   "object with the following key: (percent, an integer).  "
@@ -283,8 +281,7 @@ Archiver::archive(const Transaction& tran,
             eNone,
             eDeflate,
             eGZip,
-            eBZip2,
-            eXz
+            eBZip2
         } tCompression;
         tCompression compression = eNone;
         if (format == "zip") { 
@@ -307,10 +304,6 @@ Archiver::archive(const Transaction& tran,
             m_canArchiveSymlinks = true;
             compression = eBZip2;
             m_archivePath.replace_extension(nativeFromUtf8(".tar.bz2"));
-        } else if (format == "tar-xz") {
-            m_canArchiveSymlinks = true;
-            compression = eXz;
-            m_archivePath.replace_extension(nativeFromUtf8(".tar.xz"));
         } else {
             throw string("invalid format parameter");
         }
@@ -363,9 +356,6 @@ Archiver::archive(const Transaction& tran,
                 break;
             case eBZip2:
                 res = archive_write_set_compression_bzip2(m_archive);
-                break;
-            case eXz:
-                res = archive_write_set_compression_xz(m_archive);
                 break;
             }
             if (res) {

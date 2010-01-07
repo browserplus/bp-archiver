@@ -1,0 +1,10 @@
+--- libarchive-2.7.902a/libarchive/archive_write_set_format_zip.c.orig	2010-01-05 16:34:52.000000000 -0800
++++ libarchive-2.7.902a/libarchive/archive_write_set_format_zip.c	2010-01-05 16:34:35.000000000 -0800
+@@ -236,6 +236,7 @@
+ 		archive_set_error(&a->archive, ENOMEM, "Can't allocate zip data");
+ 		return (ARCHIVE_FATAL);
+ 	}
++    memset(zip, 0, sizeof(*zip));
+ 	zip->central_directory = NULL;
+ 	zip->central_directory_end = NULL;
+ 	zip->offset = 0;

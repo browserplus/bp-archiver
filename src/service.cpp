@@ -1,0 +1,685 @@
+/**
+ * ***** BEGIN LICENSE BLOCK *****
+ * The contents of this file are subject to the Mozilla Public License
+ * Version 1.1 (the "License"); you may not use this file except in
+ * compliance with the License. You may obtain a copy of the License at
+ * http://www.mozilla.org/MPL/
+ * 
+ * Software distributed under the License is distributed on an "AS IS"
+ * basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See the
+ * License for the specific language governing rights and limitations
+ * under the License.
+ * 
+ * The Original Code is BrowserPlus (tm).
+ * 
+ * The Initial Developer of the Original Code is Yahoo!.
+ * Portions created by Yahoo! are Copyright (C) 2006-2009 Yahoo!.
+ * All Rights Reserved.
+ * 
+ * Contributor(s): 
+ * ***** END LICENSE BLOCK ***** */
+
+#include <sys/stat.h>
+
+#ifdef WIN32
+#define _SCL_SECURE_NO_WARNINGS
+#define lstat stat
+#endif
+
+#include "boost/filesystem.hpp"
+
+#define LIBARCHIVE_STATIC 
+#include "libarchive/archive.h"
+#include "libarchive/archive_entry.h"
+
+#include "bpservice/bpservice.h"
+#include "bpservice/bpcallback.h"
+#include "bp-file/bpfile.h"
+
+#if defined(WIN32)
+#include <windows.h>
+#endif
+
+// deal with Windows naming...
+#if defined(WIN32)
+#define tStat struct _stat
+#define stat(x,y) _wstat(x,y)
+#else
+#define tStat struct stat
+#endif
+
+// When unarchive() is implemented, remove uses of this define.
+// It is currently unimplemented because we need to consider
+// all of the security aspects.
+#undef UNARCHIVE_IMPLEMENTED
+
+#define ARCHIVE_BUF_SIZE (64 * 1024)
+
+using namespace std;
+using namespace bp::file;
+using namespace bplus::service;
+namespace bfs = boost::filesystem;
+
+typedef enum {
+    eNone,
+    eDeflate,
+    eGZip,
+    eBZip2,
+    eXz
+} tCompression;
+
+class Archiver : public Service
+{
+public:
+    class SizeVisitor : virtual public IVisitor
+    {
+    public:
+        SizeVisitor(Archiver* archiver) : m_archiver(archiver), m_size(0) {
+        }
+        virtual ~SizeVisitor() {
+        }
+        virtual tResult visitNode(const Path& p,
+                                  const Path& relPath);
+        virtual boost::uintmax_t size() const { return m_size; }
+    protected:
+        Archiver* m_archiver;
+        boost::uintmax_t m_size;
+    };
+
+    class WriteVisitor : virtual public IVisitor
+    {
+    public:
+        WriteVisitor(Archiver* archiver) : m_archiver(archiver) {
+        }
+        virtual ~WriteVisitor() {
+        }
+        virtual tResult visitNode(const Path& p,
+                                  const Path& relPath);
+    protected:
+        Archiver* m_archiver;
+    };
+
+    BP_SERVICE(Archiver);
+    
+    Archiver() : Service(), m_paths(), m_followLinks(false),
+                 m_tempDir(), m_archive(NULL), m_archivePath(),
+                 m_progressCallback(NULL),
+                 m_totalBytes(0), m_bytesProcessed(0),
+                 m_percent(0), m_lastPercent(0),
+                 m_zeroProgressSent(false), m_hundredProgressSent(false),
+                 m_numAdded(0), m_canArchiveSymlinks(false) {
+    }
+    ~Archiver() {
+    }
+
+    void archive(const Transaction& tran, 
+                 const bplus::Map& args);
+#ifdef UNARCHIVE_IMPLEMENTED
+    void unarchive(const Transaction& tran, 
+                   const bplus::Map& args);
+#endif
+
+private:
+    void reset();
+    void calculateTotalSize();
+    void writeFile(const Path& fullPath,
+                   const Path& relativePath);
+    void sendProgress();
+    void doSendProgress(boost::uintmax_t num, 
+                        unsigned int percent);
+    
+    std::vector<Path> m_paths;
+    bool m_followLinks;
+    Path m_tempDir;
+    struct archive* m_archive;
+    Path m_archivePath;
+    Callback* m_progressCallback;
+    boost::uintmax_t m_totalBytes;
+    boost::uintmax_t m_bytesProcessed;
+    unsigned int m_percent;
+    unsigned int m_lastPercent;
+    bool m_zeroProgressSent;
+    bool m_hundredProgressSent;
+    size_t m_numAdded;
+    bool m_canArchiveSymlinks;
+};
+
+#ifdef UNARCHIVE_IMPLEMENTED
+BP_SERVICE_DESC(Archiver, "Archiver", "1.0.0",
+                "Lets you archive/unarchive files and directories.")
+#else
+BP_SERVICE_DESC(Archiver, "Archiver", "1.0.0",
+                "Lets you archive files and directories.")
+#endif
+
+ADD_BP_METHOD(Archiver, archive,
+              "Create a archive file from a list of file handles. "
+              "Service returns a \"archiveFile\" filehandle for the "
+              "resulting archive file.")
+ADD_BP_METHOD_ARG(archive, "files", List, true,
+                  "A list of filehandles to be added to the archive.")
+
+// XXX document "appropriate"
+ADD_BP_METHOD_ARG(archive, "archiveFileName", String, false,
+                  "Filename for resulting archive file.  An appropriate "
+                  "suffix will be appended if necessary.")
+
+ADD_BP_METHOD_ARG(archive, "followLinks", Boolean, false, 
+                  "If true, symbolic links will be followed, otherwise "
+                  "the link itself will be archived.  Default is false.  "
+                  "For broken symbolic links, the link itself is archived.  "
+                  "Links are never archived on Windows.")
+
+// XXX compression/format combos
+ADD_BP_METHOD_ARG(archive, "format", String, true, 
+                  "Archive format, either 'zip' or 'tar'.")
+ADD_BP_METHOD_ARG(archive, "compression", String, false, 
+                  "Compression format, can be 'none', 'deflate', "
+                  "'gzip', 'bzip2, 'xz'.  Default is 'none'.")
+
+ADD_BP_METHOD_ARG(archive, "progressCallback", CallBack, false,
+                  "An optional progress callback which is passed an "
+                  "object with the following key: (percent, an integer).  "
+                  "The callback is guaranteed to called with percent "
+                  "values of 0 and 100 (unless an error occurs).")
+#ifdef UNARCHIVE_IMPLEMENTED
+ADD_BP_METHOD(Archiver, unarchive,
+              "Unarchive a file handle.  Service returns a filehandle for "
+              "the folder containing the unarchiveed contents.")
+#endif
+END_BP_SERVICE_DESC
+
+
+// Size visitor just sums up file sizes for 
+// use in progress callback.  Dirs count as 1 byte.
+IVisitor::tResult
+Archiver::SizeVisitor::visitNode(const Path& p,
+                                 const Path& /*relPath*/)
+{
+    try {
+#ifdef WIN32
+        // "p" will be a link if !followLinks or if
+        // link is broken.  In either case, we don't archive
+        // the link itself.
+        if (isLink(p)) {
+            return eOk;
+        }
+#endif
+        if (bfs::is_symlink(p) && m_archiver->m_canArchiveSymlinks) {
+            m_size++;
+        } else if (bfs::is_directory(p)) {
+            m_size++;
+        } else if (bfs::exists(p)) {
+            m_size += bfs::file_size(p);
+        }
+    } catch (const tFileSystemError& e) {
+        m_archiver->log(BP_ERROR, "SizeVisitor on " + p.utf8()
+                   + "catches boost::filesystem exception, path1: '" 
+                   + Path(e.path1()).utf8()
+                   +", path2: '" + Path(e.path2()).utf8()
+                   + "' (" + e.what() + ")");
+    }
+    return eOk;
+}
+
+
+// Write visitor adds an entry to archive, preserving
+// it's name relative to where the archive started
+IVisitor::tResult
+Archiver::WriteVisitor::visitNode(const Path& p,
+                                const Path& relPath)
+{
+#ifdef WIN32
+    // "p" will be a link if !followLinks or if
+    // link is broken.  In either case, we don't archive
+    // the link itself.
+    if (isLink(p)) {
+        return eOk;
+    }
+#endif
+    m_archiver->writeFile(p, relPath);
+    return eOk;
+}
+
+
+// create a archive file
+void
+Archiver::archive(const Transaction& tran, 
+                  const bplus::Map& args)
+{
+    try {
+        reset();
+
+        // get our temp dir where archive will be created
+        string tmpDir = context("temp_dir");
+        if (tmpDir.empty()) {
+            throw string("no temp_dir in service context");
+        }
+        m_tempDir = Path(tmpDir);
+        (void) bfs::create_directories(m_tempDir);
+
+        // dig out args
+
+        // fileList, required
+        const bplus::List* fileList = NULL;
+        if (!args.getList("files", fileList)) {
+            throw string("required files parameter missing");
+        }
+        for (unsigned int i = 0; i < fileList->size(); i++) {
+            const bplus::Path* uri = dynamic_cast<const bplus::Path*>(fileList->value(i));
+            if (uri == NULL) {
+                throw string("files must contain BPTPaths");
+            }
+            Path path = pathFromURL((string)*uri);
+            m_paths.push_back(path);
+        }
+        
+        // compression, optional
+        tCompression compressionType = eNone;
+        string compression("none");
+        (void) args.getString("compression", compression);
+        if (compression == "none") {
+            compressionType = eNone;
+        } else if (compression == "deflate") {
+            compressionType = eDeflate;
+        } else if (compression == "gzip") {
+            compressionType = eGZip;
+        } else if (compression == "bzip2") {
+            compressionType = eBZip2;
+        } else if (compression == "Xz") {
+            compressionType = eXz;
+        } else {
+            throw string("invalid compression parameter");
+        }
+
+        // format, required
+        // zip can only do none or deflate, tar cannot do deflate
+        string format;
+        if (!args.getString("format", format)) {
+            throw string("required format parameter missing");
+        }
+        if (format == "zip") {
+            if (compressionType != eNone && compressionType != eDeflate) {
+                throw string("invalid format/compression combination");
+            }
+        } else if (format == "tar") {
+            if (compressionType == eDeflate) {
+                throw string("invalid format/compression combination");
+            }
+#ifndef WIN32
+            m_canArchiveSymlinks = true;
+#endif
+        } else {
+            throw string("invalid format parameter");
+        }
+
+        // archiveFileName, optional.  ignore any leading directories 
+        // and force an appropriate extension
+        string archiveFileName;
+        if (args.getString("archiveFileName", archiveFileName)) {
+            Path p(archiveFileName);
+            m_archivePath = m_tempDir / p.filename();
+        } else {
+            Path p = getTempPath(m_tempDir, "ArchiverService_");
+            m_archivePath = p;
+        }
+        if (format == "zip") {
+            m_archivePath.replace_extension(nativeFromUtf8(".zip"));
+        } else if (format == "tar") {
+            switch (compressionType) {
+            case eNone:
+                m_archivePath.replace_extension(nativeFromUtf8(".tar"));
+                break;
+            case eGZip:
+                m_archivePath.replace_extension(nativeFromUtf8(".tar.gz"));
+                break;
+            case eBZip2:
+                m_archivePath.replace_extension(nativeFromUtf8(".tar.bz2"));
+                break;
+            case eXz:
+                m_archivePath.replace_extension(nativeFromUtf8(".tar.xz"));
+                break;
+            }
+        }
+        
+        // followLinks, optional. 
+        args.getBool("followLinks", m_followLinks);
+
+        // progressCallback, optional
+        const bplus::CallBack* cb =
+            dynamic_cast<const bplus::CallBack*>(args.value("progressCallback"));
+        if (cb) {
+            m_progressCallback = new Callback(tran, *cb);
+            calculateTotalSize();
+        }
+        
+        // Got everything we need, time to make a archivefile.  
+        // First set format, options, compression
+        m_archive = archive_write_new();    
+        if (m_archive == NULL) {
+            throw string("archive_write_new() failed");
+        }
+        if (format == "zip") {
+            if (archive_write_set_format_zip(m_archive)) {
+                throw string("unable to set archive format");
+            }
+            string c = "zip:compression=";
+            c += compressionType == eDeflate ? "deflate" : "store";
+            if (archive_write_set_format_options(m_archive, c.c_str())) {
+                throw string("unable to set archive options: " + c);
+            }
+            if (archive_write_set_compression_none(m_archive)) {
+                throw string("unable to set compression");
+            }
+        } if (format == "tar") {
+            if (archive_write_set_format_ustar(m_archive)) {
+                throw string("unable to set archive format");
+            }
+            int res = 0;
+            switch (compressionType) {
+            case eNone:
+                res = archive_write_set_compression_none(m_archive);
+                break;
+            case eGZip:
+                res = archive_write_set_compression_gzip(m_archive);
+                break;
+            case eBZip2:
+                res = archive_write_set_compression_bzip2(m_archive);
+                break;
+            case eXz:
+                res = archive_write_set_compression_xz(m_archive);
+                break;
+            }
+            if (res) {
+                throw string("unable to set compression filter");
+            }
+        }
+
+        // now open up the archive
+        if (archive_write_open_filename(m_archive, m_archivePath.utf8().c_str())) {
+            throw string("unable to open archive file '" + m_archivePath.utf8() + "'");
+        }
+        
+        // add the contents
+        for (size_t i = 0; i < m_paths.size(); ++i) {
+            Path path = m_paths[i];
+            WriteVisitor v(this);
+            recursiveVisit(path, v, m_followLinks);
+        }
+        if (m_numAdded == 0) {
+            throw string("no files were added to archive");
+        }
+        
+        // close it 
+        archive_write_close(m_archive);
+        archive_write_finish(m_archive);
+        
+        // just in case we somehow botched the progress calcs, 
+        // honor our 0/100% guarantee 
+        if (m_progressCallback) {
+            if (!m_zeroProgressSent) {
+                doSendProgress(m_totalBytes, 0);
+            }
+            if (!m_hundredProgressSent) {
+                doSendProgress(m_totalBytes, 100);
+            }
+        }
+
+        // return success
+        bplus::Map results;
+        results.add("success", new bplus::Bool(true));
+        results.add("archiveFile", new bplus::Path(m_archivePath.externalUtf8()));
+        tran.complete(results);
+        
+    } catch (const string& msg) {
+        // one of our exceptions
+        log(BP_DEBUG, "Archiver::archive(), catch " + msg);
+        if (m_archive) {
+            archive_write_close(m_archive);
+            archive_write_finish(m_archive);
+        }
+        tran.error("archiveError", msg.c_str());
+
+    } catch (const tFileSystemError& e) {
+        // a boost::filesystem exception
+        string msg = "Archiver::archive(), catch boost::filesystem exception, path1: '" 
+                     + Path(e.path1()).utf8()
+                     +", path2: '" + Path(e.path2()).utf8()
+                     + "' (" + e.what() + ")";
+        log(BP_ERROR, "Archiver: " + msg);
+        tran.error("archiveError", msg.c_str());
+    }
+}
+
+
+#ifdef UNARCHIVE_IMPLEMENTED
+void
+Archiver::unarchive(const Transaction& tran, 
+                    const bplus::Map& /*args*/)
+{
+    reset();
+    tran.error("unimplemented function", "unarchive");
+}
+#endif
+
+
+void
+Archiver::reset()
+{
+    if (m_progressCallback) {
+        delete m_progressCallback;
+        m_progressCallback = NULL;
+    }
+    m_paths.clear();
+    m_followLinks = false;
+    m_archive = NULL;
+    m_archivePath = string("");
+    m_totalBytes = 0;
+    m_bytesProcessed = 0;
+    m_percent = 0;
+    m_lastPercent = 0;
+    m_zeroProgressSent = false;
+    m_hundredProgressSent = false;
+    m_numAdded = 0;
+}
+
+
+void
+Archiver::calculateTotalSize() 
+{ 
+    m_totalBytes = 0;
+    for (size_t i = 0; i < m_paths.size(); ++i) {
+        SizeVisitor v(this);
+        recursiveVisit(m_paths[i], v, m_followLinks);
+        m_totalBytes += v.size();
+    }
+}
+
+
+void
+Archiver::writeFile(const Path& fullPath,
+                    const Path& relativePath)
+{
+    log(BP_DEBUG, "writefile(" + fullPath.utf8()
+                  + ", " + relativePath.utf8() + ")");
+    
+    try {
+        if (bfs::is_other(fullPath)) {
+            log(BP_DEBUG, "skipping non file/dir " + fullPath.utf8());
+            return;
+        }
+        
+        bool isDir = bfs::is_directory(fullPath);
+        bool isSymlink = bfs::is_symlink(fullPath);
+            
+        // Stat the file.
+        tStat s;
+        int rv = 0;
+        if (isSymlink) {
+            if (!m_canArchiveSymlinks) {
+                log(BP_DEBUG, "skipping symlink " + fullPath.utf8());
+                return;
+            }
+            rv = ::lstat(fullPath.external_file_string().c_str(), &s);
+        } else {
+            rv = ::stat(fullPath.external_file_string().c_str(), &s);
+        }
+        if (rv != 0) {
+            log(BP_WARN, "unable to stat '" + fullPath.utf8() + "'");
+            return;
+        }
+            
+#ifdef WIN32
+        // set mode - on windows we'll default to 0644 (0755 for dirs),
+        // if readonly is set, we'll turn off 0200
+        DWORD attr = GetFileAttributesW(fullPath.external_file_string().c_str());
+        unsigned short mode = attr & FILE_ATTRIBUTE_DIRECTORY ? 0755 : 0644;
+        if (attr & FILE_ATTRIBUTE_READONLY) {
+            mode &= ~0200;
+        }
+#endif
+            
+        // write to archive
+        struct archive_entry* ae = NULL;
+        try {
+            ae = archive_entry_new();
+            archive_entry_clear(ae);
+                
+            // now include file information
+#ifdef WIN32
+            archive_entry_set_atime(ae, s.st_atime, 0);
+            archive_entry_set_mtime(ae, s.st_mtime, 0);
+            archive_entry_set_ctime(ae, s.st_ctime, 0);
+            archive_entry_set_mode(ae, mode);
+            if (isDir) {
+                archive_entry_set_filetype(ae, AE_IFDIR);
+                archive_entry_set_size(ae, 0);
+            } else {
+                archive_entry_set_filetype(ae, AE_IFREG);
+                archive_entry_set_size(ae, bfs::file_size(fullPath));
+            }
+#else
+            archive_entry_copy_stat(ae, &s);
+#endif
+
+#ifndef WIN32
+            // handle symlinks
+            if (isSymlink) {
+                char buf[PATH_MAX];
+                int nchars = ::readlink(fullPath.utf8().c_str(),
+                                        buf, sizeof(buf));
+                if (nchars == -1) {
+                    throw string("unable to readlink '" + fullPath.utf8() + "'");
+                }
+                buf[nchars] = 0;
+                archive_entry_set_symlink(ae, buf);
+                if (m_progressCallback) {
+                    m_bytesProcessed++;  // symlinks have a faux size of 1
+                    sendProgress();
+                }
+            }
+#endif
+
+#ifdef WIN32
+            archive_entry_copy_pathname_w(ae, relativePath.string().c_str());
+#else
+            archive_entry_set_pathname(ae, relativePath.utf8().c_str());
+#endif
+
+            if (archive_write_header(m_archive, ae) != 0) {
+                throw string("error writing header for '" + fullPath.utf8() + "'");
+            }
+            archive_entry_free(ae);
+                
+            if (isDir) {
+                m_bytesProcessed++;  // dirs have a faux size of 1
+                sendProgress();
+            } else {
+                // now write file data
+                unsigned char buf[ARCHIVE_BUF_SIZE];
+                bfs::ifstream fstream;
+                fstream.open(fullPath, ios::binary);
+                if (!fstream.good()) {
+                    throw string("unable to open '" + fullPath.utf8() + "'");
+                }
+                for (;;) {
+                    fstream.read((char*)buf, ARCHIVE_BUF_SIZE);
+                    size_t rd = fstream.gcount();
+                    if (rd > 0) {
+                        size_t wt = archive_write_data(m_archive,
+                                                       (void*)buf, rd);
+                        if (wt != rd) {
+                            throw string("archive write error");
+                        }
+                        if (m_progressCallback) {
+                            m_bytesProcessed += wt;
+                            sendProgress();
+                        }
+                    }
+                    if (fstream.eof()) {
+                        break;
+                    }
+                    if (fstream.fail()) {
+                        throw string("stream read error");
+                    }
+                }
+            }
+            m_numAdded++;
+        } catch (string& e) {
+            if (m_archive) {
+                const char* archiveError = archive_error_string(m_archive);
+                if (archiveError) {
+                    e += string(": ") + archiveError;
+                }
+            }
+            log(BP_ERROR, "Archiver::writeFile(" + fullPath.utf8()
+                + ", " + relativePath.utf8() + "): " + e);
+            archive_entry_free(ae);
+            throw e;
+        }
+    } catch (const tFileSystemError& e) {
+        string msg = "Archiver::writeFile(" + fullPath.utf8()
+                      + ", " + relativePath.utf8() + "): " + e.what();
+        log(BP_ERROR, msg);
+        throw msg;
+    }
+}
+
+
+void
+Archiver::sendProgress()
+{
+    if (m_totalBytes > 0) {
+        m_percent = (unsigned int)((float)m_bytesProcessed / m_totalBytes * 100);
+    } else {
+        m_percent = 0;
+    }
+    if (m_percent <= m_lastPercent) {
+        return;
+    }
+    if (!m_zeroProgressSent) {
+        doSendProgress(0, 0);
+        m_zeroProgressSent = true;
+    }
+    if (m_percent >= 100) {
+        if (!m_hundredProgressSent) {
+            doSendProgress(m_totalBytes, 100);
+            m_hundredProgressSent = true;
+        }
+    } else {
+        doSendProgress(m_bytesProcessed, m_percent);
+        m_lastPercent = m_percent;
+    }
+}
+
+
+void
+Archiver::doSendProgress(boost::uintmax_t num, 
+                    unsigned int percent)
+{
+    bplus::Map m;
+    m.add("percent", new bplus::Integer((long long) percent));
+    m_progressCallback->invoke(m);
+    log(BP_INFO, "Archiver, invoke progressCallback: " + percent);
+}
+

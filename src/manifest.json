@@ -1,0 +1,10 @@
+{
+  "type": "standalone",
+  "CoreletLibrary": "@ServiceLibrary@",
+    "strings": { 
+      "en": { 
+          "title": "Zipper Service", 
+          "summary": "Lets you tar up files and directories."
+      }
+    }
+  }

@@ -167,8 +167,10 @@ ADD_BP_METHOD_ARG(archive, "archiveFileName", String, false,
                   "under the 'format' argument.")
 ADD_BP_METHOD_ARG(archive, "followLinks", Boolean, false, 
                   "If true, links (symbolic links, shortcuts, aliases) will be "
-                  "followed, otherwise the link itself will be archived.  Default "
-                  "is false.  Symbolic links are not archived on Windows.")
+                  "followed, otherwise the link itself will be archived.  "
+                  "Default is false.  Symbolic links cannot be archived in "
+                  "the zip formats.  Symbolic links are not archived on "
+                  "Windows, and aliases are not archived on OSX.")
 ADD_BP_METHOD_ARG(archive, "progressCallback", CallBack, false,
                   "An optional progress callback which is passed an "
                   "object with the following key: (percent, an integer).  "
@@ -202,6 +204,12 @@ Archiver::SizeVisitor::visitNode(const Path& p,
             return eOk;
         }
 #endif
+#ifdef MACOSX
+        // no alias archival on osx
+        if (isLink(p) && !isSymlink(p)) {
+            return eOk;
+        }
+#endif
         if (bfs::is_symlink(p) && m_archiver->m_canArchiveSymlinks) {
             m_size++;
         } else if (bfs::is_directory(p)) {
@@ -229,6 +237,12 @@ Archiver::WriteVisitor::visitNode(const Path& p,
 #ifdef WIN32
     // no symlink archival on windows yet
     if (isSymlink(p)) {
+        return eOk;
+    }
+#endif
+#ifdef MACOSX
+    // no alias archival on osx
+    if (isLink(p) && !isSymlink(p)) {
         return eOk;
     }
 #endif

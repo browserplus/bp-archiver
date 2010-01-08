@@ -24,6 +24,8 @@
 #ifdef WIN32
 #define _SCL_SECURE_NO_WARNINGS
 #define lstat stat
+#define getcwd _wgetcwd
+#defind chdir _wchdir
 #endif
 
 #include "boost/filesystem.hpp"
@@ -48,10 +50,10 @@
 #define tStat struct stat
 #endif
 
-// When unarchive() is implemented, remove uses of this define.
-// It is currently unimplemented because we need to consider
+// When unarchive() is exposed, remove uses of this define.
+// It is currently unexposed because we need to consider
 // all of the security aspects.
-#undef UNARCHIVE_IMPLEMENTED
+#undef UNARCHIVE_EXPOSED
 
 #define ARCHIVE_BUF_SIZE (64 * 1024)
 
@@ -106,12 +108,13 @@ public:
 
     void archive(const Transaction& tran, 
                  const bplus::Map& args);
-#ifdef UNARCHIVE_IMPLEMENTED
+#ifdef UNARCHIVE_EXPOSED
     void unarchive(const Transaction& tran, 
                    const bplus::Map& args);
 #endif
 
 private:
+    static void readProgressCB(void* cookie);
     void reset();
     void calculateTotalSize();
     void writeFile(const Path& fullPath,
@@ -119,7 +122,10 @@ private:
     void sendProgress();
     void doSendProgress(boost::uintmax_t num, 
                         unsigned int percent);
-    
+#ifdef UNARCHIVE_EXPOSED
+    void checkSafety(const Path& destDir,
+                     const Path& path); // throws std::string
+#endif
     std::vector<Path> m_paths;
     bool m_followLinks;
     Path m_tempDir;
@@ -136,7 +142,7 @@ private:
     bool m_canArchiveSymlinks;
 };
 
-#ifdef UNARCHIVE_IMPLEMENTED
+#ifdef UNARCHIVE_EXPOSED
 BP_SERVICE_DESC(Archiver, "Archiver", "1.0.0",
                 "Lets you archive/unarchive files and directories.")
 #else
@@ -169,10 +175,17 @@ ADD_BP_METHOD_ARG(archive, "progressCallback", CallBack, false,
                   "object with the following key: (percent, an integer).  "
                   "The callback is guaranteed to called with percent "
                   "values of 0 and 100 (unless an error occurs).")
-#ifdef UNARCHIVE_IMPLEMENTED
+#ifdef UNARCHIVE_EXPOSED
 ADD_BP_METHOD(Archiver, unarchive,
-              "Unarchive a file handle.  Service returns a filehandle for "
-              "the folder containing the unarchiveed contents.")
+              "Unarchive a file handle.  Service returns an \"archiveDir\" "
+              "filehandle for the folder containing the unarchived contents.")
+ADD_BP_METHOD_ARG(unarchive, "file", Path, true,
+                  "Filehandle to be extracted.")
+ADD_BP_METHOD_ARG(unarchive, "progressCallback", CallBack, false,
+                  "An optional progress callback which is passed an "
+                  "object with the following key: (percent, an integer).  "
+                  "The callback is guaranteed to called with percent "
+                  "values of 0 and 100 (unless an error occurs).")
 #endif
 END_BP_SERVICE_DESC
 
@@ -401,11 +414,9 @@ Archiver::archive(const Transaction& tran,
         
     } catch (const string& msg) {
         // one of our exceptions
-        log(BP_DEBUG, "Archiver::archive(), catch " + msg);
-        if (m_archive) {
-            archive_write_close(m_archive);
-            archive_write_finish(m_archive);
-        }
+        string archiveErr = m_archive ? archive_error_string(m_archive) : "";
+        log(BP_DEBUG, "Archiver::archive(), catch " + msg
+                      + ", archiveErr = " + archiveErr);
         tran.error("archiveError", msg.c_str());
 
     } catch (const tFileSystemError& e) {
@@ -420,13 +431,119 @@ Archiver::archive(const Transaction& tran,
 }
 
 
-#ifdef UNARCHIVE_IMPLEMENTED
+#ifdef UNARCHIVE_EXPOSED
 void
 Archiver::unarchive(const Transaction& tran, 
-                    const bplus::Map& /*args*/)
+                    const bplus::Map& args)
 {
-    reset();
-    tran.error("unimplemented function", "unarchive");
+    tChar buf[32768];
+    if (!::getcwd(buf, sizeof(buf))) {
+        throw string("unable to getcwd");
+    }
+    Path curDir(buf);
+            
+    try {
+        reset();
+
+        // get our temp dir where archive will be extracted
+        string tmpDir = context("temp_dir");
+        if (tmpDir.empty()) {
+            throw string("no temp_dir in service context");
+        }
+        m_tempDir = getTempPath(Path(tmpDir), "ArchiveService_");
+        (void) bfs::create_directories(m_tempDir);
+
+        // cd to tempdir, that's where archive will extract relative paths
+        if (::chdir(m_tempDir.string().c_str())) {
+            throw string("unable to chdir to " + m_tempDir.utf8());
+        }
+
+        // dig out args
+
+        // file, required
+        const bplus::Path* p = dynamic_cast<const bplus::Path*>(args.value("file"));
+        if (p == NULL) {
+            throw string("file must contain a BPTPath");
+        }
+        Path archivePath = pathFromURL((string)*p);
+        if (!bfs::is_regular_file(archivePath)) {
+            throw string(archivePath.utf8() + " is not a regular file");
+        }
+
+        // progressCallback, optional
+        const bplus::CallBack* cb =
+            dynamic_cast<const bplus::CallBack*>(args.value("progressCallback"));
+        if (cb) {
+            m_progressCallback = new Callback(tran, *cb);
+            m_totalBytes = bfs::file_size(archivePath);
+        }
+        
+        // time to extract
+        m_archive = archive_read_new();
+        archive_read_support_format_zip(m_archive);
+        archive_read_support_format_tar(m_archive);
+        archive_read_support_compression_none(m_archive);
+        archive_read_support_compression_bzip2(m_archive);
+        archive_read_support_compression_gzip(m_archive);
+        if (archive_read_open_filename(m_archive, archivePath.utf8().c_str(), ARCHIVE_BUF_SIZE)) {
+            throw string("unable to open archive: " + archivePath.utf8());
+        }
+        if (cb) {
+            archive_read_extract_set_progress_callback(m_archive, readProgressCB, this);
+        }
+
+        bool headerRead = false;
+        struct archive_entry* entry;
+        while (archive_read_next_header(m_archive, &entry) == ARCHIVE_OK) {
+            headerRead = true;
+            Path p = archive_entry_pathname(entry);
+#ifdef UNARCHIVE_EXPOSED
+            checkSafety(m_tempDir, p);
+#endif
+            int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_SECURE_SYMLINKS;
+            if (archive_read_extract(m_archive, entry, flags)) {
+                throw string("unable to extract to " + p.utf8()
+                             + ": " + archive_error_string(m_archive));
+            }
+        }
+        archive_read_finish(m_archive);
+        if (!headerRead) {
+            throw string(archivePath.utf8() + " is not a recognized archive");
+        }
+
+        // cd back to starting dir
+        if (::chdir(curDir.string().c_str())) {
+            throw string("unable to chdir to " + curDir.utf8());
+        }
+
+        // return success
+        bplus::Map results;
+        results.add("success", new bplus::Bool(true));
+        results.add("archiveDir", new bplus::Path(m_tempDir.externalUtf8()));
+        tran.complete(results);
+
+    } catch (const string& msg) {
+        // one of our exceptions
+        if (!curDir.empty()) {
+            (void)::chdir(curDir.string().c_str());
+        }
+        string archiveErr = m_archive ? archive_error_string(m_archive) : "";
+        log(BP_DEBUG, "Archiver::unarchive(), catch " + msg
+                      + ", archiveErr = " + archiveErr);
+        tran.error("unarchiveError", msg.c_str());
+
+    } catch (const tFileSystemError& e) {
+        // a boost::filesystem exception
+        if (!curDir.empty()) {
+            (void)::chdir(curDir.string().c_str());
+        }
+        string msg = "Archiver::unarchive(), catch boost::filesystem exception, path1: '" 
+                     + Path(e.path1()).utf8()
+                     +", path2: '" + Path(e.path2()).utf8()
+                     + "' (" + e.what() + ")";
+        log(BP_ERROR, "Archiver: " + msg);
+        tran.error("unarchiveError", msg.c_str());
+    }
 }
 #endif
 
@@ -654,3 +771,56 @@ Archiver::doSendProgress(boost::uintmax_t num,
     log(BP_INFO, "Archiver, invoke progressCallback: " + percent);
 }
 
+
+#ifdef UNARCHIVE_EXPOSED
+// we have to make sure that the file is safe for unarchiving.  
+// Namely that:
+// - the path does not attempt to specify an absolute path
+// - the path name contains no stream references (Windows)
+// - if the path contains "..", that the "canonicalized" path 
+//   has the same root as the destination dir
+//
+// destDir is destination dir
+// path is the pathname within the archive
+//
+void
+Archiver::checkSafety(const Path& destDir,
+                      const Path& path)
+{
+    // the path cannot be an absolute path
+    if (!path.root_directory().empty()) {
+        throw string(path.utf8() + " cannot be absolute");
+    }
+    
+#ifdef WIN32
+    // the name in the zip can not contain any stream references
+    if (path.relative_path().string().find(L":") != string::npos) {
+        throw string(path.utf8() + " contains a stream reference");
+    }
+#endif
+    
+    // Make sure the "canonicalized" path is a subdir of the destination dir 
+    // [i.e. don't let a file "jump out" of the destination dir].
+    Path resolved = destDir / path;
+    resolved = resolved.canonical();
+    tString destDirPrefix = destDir.string() + "/";
+    if (resolved.string().find(destDirPrefix) != 0) {
+        throw string(path.utf8() + " resolves outside of destination dir");
+    }
+    if (bfs::is_other(resolved)) {
+        throw string(path.utf8() + " refers to a non file/dir/symlink");
+    }
+}
+
+
+void 
+Archiver::readProgressCB(void* cookie)
+{
+    Archiver* self = (Archiver*) cookie;
+    if (self->m_archive == NULL || self->m_progressCallback == NULL) {
+        return;
+    }
+    self->m_bytesProcessed = archive_position_compressed(self->m_archive);
+    self->sendProgress();
+}
+#endif

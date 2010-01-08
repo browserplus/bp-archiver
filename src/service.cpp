@@ -25,7 +25,7 @@
 #define _SCL_SECURE_NO_WARNINGS
 #define lstat stat
 #define getcwd _wgetcwd
-#defind chdir _wchdir
+#define chdir _wchdir
 #endif
 
 #include "boost/filesystem.hpp"
@@ -166,10 +166,9 @@ ADD_BP_METHOD_ARG(archive, "archiveFileName", String, false,
                   "suffix will be appended if necessary, as documented "
                   "under the 'format' argument.")
 ADD_BP_METHOD_ARG(archive, "followLinks", Boolean, false, 
-                  "If true, symbolic links will be followed, otherwise "
-                  "the link itself will be archived.  Default is false.  "
-                  "For broken symbolic links, the link itself is archived.  "
-                  "Links are never archived on Windows.")
+                  "If true, links (symbolic links, shortcuts, aliases) will be "
+                  "followed, otherwise the link itself will be archived.  Default "
+                  "is false.  Symbolic links are not archived on Windows.")
 ADD_BP_METHOD_ARG(archive, "progressCallback", CallBack, false,
                   "An optional progress callback which is passed an "
                   "object with the following key: (percent, an integer).  "
@@ -198,10 +197,8 @@ Archiver::SizeVisitor::visitNode(const Path& p,
 {
     try {
 #ifdef WIN32
-        // "p" will be a link if !followLinks or if
-        // link is broken.  In either case, we don't archive
-        // the link itself.
-        if (isLink(p)) {
+        // no symlink archival on windows yet
+        if (isSymlink(p)) {
             return eOk;
         }
 #endif
@@ -230,10 +227,8 @@ Archiver::WriteVisitor::visitNode(const Path& p,
                                 const Path& relPath)
 {
 #ifdef WIN32
-    // "p" will be a link if !followLinks or if
-    // link is broken.  In either case, we don't archive
-    // the link itself.
-    if (isLink(p)) {
+    // no symlink archival on windows yet
+    if (isSymlink(p)) {
         return eOk;
     }
 #endif
@@ -811,7 +806,7 @@ Archiver::checkSafety(const Path& destDir,
     // [i.e. don't let a file "jump out" of the destination dir].
     Path resolved = destDir / path;
     resolved = resolved.canonical();
-    tString destDirPrefix = destDir.string() + "/";
+    tString destDirPrefix = destDir.string() + nativeFromUtf8("/");
     if (resolved.string().find(destDirPrefix) != 0) {
         throw string(path.utf8() + " resolves outside of destination dir");
     }

@@ -365,6 +365,8 @@ Archiver::archive(const Transaction& tran,
             case eBZip2:
                 res = archive_write_set_compression_bzip2(m_archive);
                 break;
+            default:
+                break;
             }
             if (res) {
                 throw string("unable to set compression filter");

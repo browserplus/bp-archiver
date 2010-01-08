@@ -480,11 +480,19 @@ Archiver::unarchive(const Transaction& tran,
         
         // time to extract
         m_archive = archive_read_new();
-        archive_read_support_format_zip(m_archive);
+
+        // XXX as of 2.5.9092a test drop, can't do xar, so call out
+        // XXX all other formats explicitly
+        archive_read_support_format_ar(m_archive);
+        archive_read_support_format_cpio(m_archive);
+        archive_read_support_format_empty(m_archive);
+        archive_read_support_format_iso9660(m_archive);
+        archive_read_support_format_mtree(m_archive);
+        archive_read_support_format_raw(m_archive);
         archive_read_support_format_tar(m_archive);
-        archive_read_support_compression_none(m_archive);
-        archive_read_support_compression_bzip2(m_archive);
-        archive_read_support_compression_gzip(m_archive);
+        archive_read_support_format_zip(m_archive);
+        archive_read_support_compression_all(m_archive);
+
         if (archive_read_open_filename(m_archive, archivePath.utf8().c_str(), ARCHIVE_BUF_SIZE)) {
             throw string("unable to open archive: " + archivePath.utf8());
         }

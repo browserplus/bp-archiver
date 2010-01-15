@@ -37,6 +37,11 @@
 
 cmake_minimum_required(VERSION 2.6)
 
+IF (APPLE)
+   SET (CMAKE_OSX_DEPLOYMENT_TARGET "10.4"
+        CACHE STRING "Compile for tiger deployment" FORCE)
+ENDIF ()
+
 # We use the bp-service-framework to handle the service api gunk
 #
 SET(frameworkDir "${CMAKE_CURRENT_SOURCE_DIR}/../external/bp-service-framework")

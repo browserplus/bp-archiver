@@ -50,7 +50,7 @@ end
       cmakeVars += " -DENABLE_TEST:BOOL=OFF"
     end
 
-    cmLine = "cmake #{cmakeGen} #{buildType} #{cmakeVars} " + " \"#{realSrcDir}\"" 
+    cmLine = "cmake #{cmakeGen} #{buildType} #{c[:cmake_args]} #{cmakeVars} " + " \"#{realSrcDir}\"" 
     puts "config cmd: #{cmLine}"
     system(cmLine)
   },

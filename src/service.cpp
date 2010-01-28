@@ -143,10 +143,10 @@ private:
 };
 
 #ifdef UNARCHIVE_EXPOSED
-BP_SERVICE_DESC(Archiver, "Archiver", "1.0.0",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.0.1",
                 "Lets you archive/unarchive files and directories.")
 #else
-BP_SERVICE_DESC(Archiver, "Archiver", "1.0.0",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.0.1",
                 "Lets you archive files and directories.")
 #endif
 

@@ -15,7 +15,6 @@ $order = {
    },
   :use_recipe => {
         "bp-file"=>File.join(topDir, "bp-file", "recipe.rb"),
-        "libarchive"=>File.join(topDir, "libarchive", "recipe.rb")
    }
 }
 

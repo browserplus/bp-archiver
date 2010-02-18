@@ -3,8 +3,8 @@
   "CoreletLibrary": "@ServiceLibrary@",
     "strings": { 
       "en": { 
-          "title": "Zipper Service", 
-          "summary": "Lets you tar up files and directories."
+          "title": "Archiver Service", 
+          "summary": "Lets you archive and optionally compress files and directories."
       }
     }
   }

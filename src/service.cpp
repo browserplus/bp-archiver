@@ -143,10 +143,10 @@ private:
 };
 
 #ifdef UNARCHIVE_EXPOSED
-BP_SERVICE_DESC(Archiver, "Archiver", "1.0.3",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.0.4",
                 "Lets you archive/unarchive files and directories.")
 #else
-BP_SERVICE_DESC(Archiver, "Archiver", "1.0.3",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.0.4",
                 "Lets you archive files and directories.")
 #endif
 
@@ -632,6 +632,16 @@ Archiver::writeFile(const Path& fullPath,
             log(BP_WARN, "unable to stat '" + fullPath.utf8() + "'");
             return;
         }
+
+        // Protect against times of -1, really upsets libarchive.
+        // Unfortunately, setting them to 0 doesn't quite do it
+        // since dos_time() in libarchive zip code translates 0 to a date
+        // in the future!  So, make some reasonable adjustments using
+        // current time.
+        time_t now = ::time(NULL);
+        if (s.st_ctime < 0) s.st_ctime = now;
+        if (s.st_atime < 0) s.st_atime = s.st_ctime;
+        if (s.st_mtime < 0) s.st_mtime = s.st_atime;
             
 #ifdef WIN32
         // set mode - on windows we'll default to 0644 (0755 for dirs),

@@ -58,45 +58,48 @@
 #define ARCHIVE_BUF_SIZE (64 * 1024)
 
 using namespace std;
-using namespace bp::file;
 using namespace bplus::service;
 namespace bfs = boost::filesystem;
+namespace bpf = bp::file;
 
 class Archiver : public Service
 {
 public:
-    class SizeVisitor : virtual public IVisitor
+    class SizeVisitor : virtual public bpf::IVisitor
     {
     public:
         SizeVisitor(Archiver* archiver) : m_archiver(archiver), m_size(0) {
         }
         virtual ~SizeVisitor() {
         }
-        virtual tResult visitNode(const Path& p,
-                                  const Path& relPath);
+        virtual tResult visitNode(const bpf::Path& p,
+                                  const bpf::Path& relPath);
         virtual boost::uintmax_t size() const { return m_size; }
     protected:
         Archiver* m_archiver;
         boost::uintmax_t m_size;
     };
 
-    class WriteVisitor : virtual public IVisitor
+    class WriteVisitor : virtual public bpf::IVisitor
     {
     public:
-        WriteVisitor(Archiver* archiver) : m_archiver(archiver) {
+        WriteVisitor(Archiver* archiver,
+                     const bpf::Path& relPath)
+            : m_archiver(archiver), m_relPath(relPath) {
         }
         virtual ~WriteVisitor() {
         }
-        virtual tResult visitNode(const Path& p,
-                                  const Path& relPath);
+        virtual tResult visitNode(const bpf::Path& p,
+                                  const bpf::Path& relPath);
     protected:
         Archiver* m_archiver;
+        bpf::Path m_relPath;
     };
 
     BP_SERVICE(Archiver);
     
-    Archiver() : Service(), m_paths(), m_followLinks(false),
-                 m_tempDir(), m_archive(NULL), m_archivePath(),
+    Archiver() : Service(), m_paths(), m_anchorPath(), m_followLinks(false),
+                 m_recurse(true), m_tempDir(), m_archive(NULL), m_archivePath(),
                  m_progressCallback(NULL),
                  m_totalBytes(0), m_bytesProcessed(0),
                  m_percent(0), m_lastPercent(0),
@@ -116,21 +119,25 @@ public:
 private:
     static void readProgressCB(void* cookie);
     void reset();
+    void findAnchorPath();
     void calculateTotalSize();
-    void writeFile(const Path& fullPath,
-                   const Path& relativePath);
+    void writeFile(const bpf::Path& fullPath,
+                   const bpf::Path& relativePath);
     void sendProgress();
     void doSendProgress(boost::uintmax_t num, 
                         unsigned int percent);
 #ifdef UNARCHIVE_EXPOSED
-    void checkSafety(const Path& destDir,
-                     const Path& path); // throws std::string
+    void checkSafety(const bpf::Path& destDir,
+                     const bpf::Path& path); // throws std::string
 #endif
-    std::vector<Path> m_paths;
+
+    std::vector<bpf::Path> m_paths;
+    bpf::Path m_anchorPath;
     bool m_followLinks;
-    Path m_tempDir;
+    bool m_recurse;
+    bpf::Path m_tempDir;
     struct archive* m_archive;
-    Path m_archivePath;
+    bpf::Path m_archivePath;
     Callback* m_progressCallback;
     boost::uintmax_t m_totalBytes;
     boost::uintmax_t m_bytesProcessed;
@@ -143,11 +150,11 @@ private:
 };
 
 #ifdef UNARCHIVE_EXPOSED
-BP_SERVICE_DESC(Archiver, "Archiver", "1.0.5",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.1.0",
                 "Lets you archive (and compress) / unarchive files "
                 "and directories.")
 #else
-BP_SERVICE_DESC(Archiver, "Archiver", "1.0.5",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.1.0",
                 "Lets you archive and optionally compress files "
                 "and directories.")
 #endif
@@ -157,7 +164,7 @@ ADD_BP_METHOD(Archiver, archive,
               "Service returns a \"archiveFile\" filehandle for the "
               "resulting archive file.")
 ADD_BP_METHOD_ARG(archive, "files", List, true,
-                  "A list of filehandles to be added to the archive.")
+                  "A list of filehandles to be archived.")
 ADD_BP_METHOD_ARG(archive, "format", String, true, 
                   "Archive format, one of 'zip', 'zip-uncompressed', 'tar', "
                   "'tar-gzip', or 'tar-bzip2'.  The archiveFileName "
@@ -173,6 +180,10 @@ ADD_BP_METHOD_ARG(archive, "followLinks", Boolean, false,
                   "Default is false.  Symbolic links cannot be archived in "
                   "the zip formats.  Symbolic links are not archived on "
                   "Windows, and aliases are not archived on OSX.")
+ADD_BP_METHOD_ARG(archive, "recurse", Boolean, false, 
+                  "If true, directory contents will be recursively added to "
+                  "the archive.  If false, only the directroy entry itself "
+                  "will be archived.  Default is true.")
 ADD_BP_METHOD_ARG(archive, "progressCallback", CallBack, false,
                   "An optional progress callback which is passed an "
                   "object with the following key: (percent, an integer).  "
@@ -195,35 +206,35 @@ END_BP_SERVICE_DESC
 
 // Size visitor just sums up file sizes for 
 // use in progress callback.  Dirs count as 1 byte.
-IVisitor::tResult
-Archiver::SizeVisitor::visitNode(const Path& p,
-                                 const Path& /*relPath*/)
+bpf::IVisitor::tResult
+Archiver::SizeVisitor::visitNode(const bpf::Path& p,
+                                 const bpf::Path& /*relPath*/)
 {
     try {
 #ifdef WIN32
         // no symlink archival on windows yet
-        if (isSymlink(p)) {
+        if (bpf::isSymlink(p)) {
             return eOk;
         }
 #endif
 #ifdef MACOSX
         // no alias archival on osx
-        if (isLink(p) && !isSymlink(p)) {
+        if (bpf::isLink(p) && !bpf::isSymlink(p)) {
             return eOk;
         }
 #endif
-        if (bfs::is_symlink(p) && m_archiver->m_canArchiveSymlinks) {
+        if (bpf::isSymlink(p) && m_archiver->m_canArchiveSymlinks) {
             m_size++;
-        } else if (bfs::is_directory(p)) {
+        } else if (bpf::isDirectory(p)) {
             m_size++;
-        } else if (bfs::exists(p)) {
-            m_size += bfs::file_size(p);
+        } else if (exists(p)) {
+            m_size += bpf::size(p);
         }
-    } catch (const tFileSystemError& e) {
+    } catch (const bpf::tFileSystemError& e) {
         m_archiver->log(BP_ERROR, "SizeVisitor on " + p.utf8()
                    + "catches boost::filesystem exception, path1: '" 
-                   + Path(e.path1()).utf8()
-                   +", path2: '" + Path(e.path2()).utf8()
+                   + bpf::Path(e.path1()).utf8()
+                   +", path2: '" + bpf::Path(e.path2()).utf8()
                    + "' (" + e.what() + ")");
     }
     return eOk;
@@ -232,23 +243,32 @@ Archiver::SizeVisitor::visitNode(const Path& p,
 
 // Write visitor adds an entry to archive, preserving
 // it's name relative to where the archive started
-IVisitor::tResult
-Archiver::WriteVisitor::visitNode(const Path& p,
-                                const Path& relPath)
+bpf::IVisitor::tResult
+Archiver::WriteVisitor::visitNode(const bpf::Path& p,
+                                  const bpf::Path& /*relPath*/)
 {
 #ifdef WIN32
     // no symlink archival on windows yet
-    if (isSymlink(p)) {
+    if (bpf::isSymlink(p)) {
         return eOk;
     }
 #endif
 #ifdef MACOSX
     // no alias archival on osx
-    if (isLink(p) && !isSymlink(p)) {
+    if (isLink(p) && !bpf::isSymlink(p)) {
         return eOk;
     }
 #endif
-    m_archiver->writeFile(p, relPath);
+    try {
+        bpf::Path relativePath = p.relativeTo(m_archiver->m_anchorPath);
+        m_archiver->writeFile(p, relativePath);
+    } catch (const bpf::tFileSystemError& e) {
+        m_archiver->log(BP_ERROR, "WriteVisitor on " + p.utf8()
+                   + "catches boost::filesystem exception, path1: '" 
+                   + bpf::Path(e.path1()).utf8()
+                   +", path2: '" + bpf::Path(e.path2()).utf8()
+                   + "' (" + e.what() + ")");
+    }
     return eOk;
 }
 
@@ -266,7 +286,7 @@ Archiver::archive(const Transaction& tran,
         if (tmpDir.empty()) {
             throw string("no temp_dir in service context");
         }
-        m_tempDir = Path(tmpDir);
+        m_tempDir = bpf::Path(tmpDir);
         (void) bfs::create_directories(m_tempDir);
 
         // dig out args
@@ -277,22 +297,26 @@ Archiver::archive(const Transaction& tran,
             throw string("required files parameter missing");
         }
         for (unsigned int i = 0; i < fileList->size(); i++) {
+            const bplus::Map* m = dynamic_cast<const bplus::Map*>(fileList->value(i));
             const bplus::Path* uri = dynamic_cast<const bplus::Path*>(fileList->value(i));
             if (uri == NULL) {
                 throw string("files must contain BPTPaths");
             }
-            Path path = pathFromURL((string)*uri);
-            m_paths.push_back(path);
+            bpf::Path thisPath = bpf::pathFromURL((string)*uri);
+            m_paths.push_back(thisPath);
+        }
+        if (m_paths.empty()) {
+            throw string("no files specified");
         }
         
         // archiveFileName, optional.  ignore any leading directories 
         // and force an appropriate extension in format handling code below
         string archiveFileName;
         if (args.getString("archiveFileName", archiveFileName)) {
-            Path p(archiveFileName);
+            bpf::Path p(archiveFileName);
             m_archivePath = m_tempDir / p.filename();
         } else {
-            Path p = getTempPath(m_tempDir, "ArchiverService_");
+            bpf::Path p = getTempPath(m_tempDir, "ArchiverService_");
             m_archivePath = p;
         }
 
@@ -311,23 +335,23 @@ Archiver::archive(const Transaction& tran,
         if (format == "zip") { 
             m_canArchiveSymlinks = false;
             compression = eDeflate;
-            m_archivePath.replace_extension(nativeFromUtf8(".zip"));
+            m_archivePath.replace_extension(bpf::nativeFromUtf8(".zip"));
         } else if (format == "zip-uncompressed") {
             m_canArchiveSymlinks = false;
             compression = eNone;
-            m_archivePath.replace_extension(nativeFromUtf8(".zip"));
+            m_archivePath.replace_extension(bpf::nativeFromUtf8(".zip"));
         } else if (format == "tar") {
             m_canArchiveSymlinks = true;
             compression = eNone;
-            m_archivePath.replace_extension(nativeFromUtf8(".tar"));
+            m_archivePath.replace_extension(bpf::nativeFromUtf8(".tar"));
         } else if (format == "tar-gzip") {
             m_canArchiveSymlinks = true;
             compression = eGZip;
-            m_archivePath.replace_extension(nativeFromUtf8(".tar.gz"));
+            m_archivePath.replace_extension(bpf::nativeFromUtf8(".tar.gz"));
         } else if (format == "tar-bzip2") {
             m_canArchiveSymlinks = true;
             compression = eBZip2;
-            m_archivePath.replace_extension(nativeFromUtf8(".tar.bz2"));
+            m_archivePath.replace_extension(bpf::nativeFromUtf8(".tar.bz2"));
         } else {
             throw string("invalid format parameter");
         }
@@ -340,6 +364,9 @@ Archiver::archive(const Transaction& tran,
         // followLinks, optional. 
         args.getBool("followLinks", m_followLinks);
 
+        // recurse, optional. 
+        args.getBool("recurse", m_recurse);
+
         // progressCallback, optional
         const bplus::CallBack* cb =
             dynamic_cast<const bplus::CallBack*>(args.value("progressCallback"));
@@ -348,6 +375,9 @@ Archiver::archive(const Transaction& tran,
             calculateTotalSize();
         }
         
+        // Find the anchor path for the files to be archived.
+        findAnchorPath();
+
         // Got everything we need, time to make a archivefile.  
         // First set format, options, compression
         m_archive = archive_write_new();    
@@ -396,9 +426,15 @@ Archiver::archive(const Transaction& tran,
         
         // add the contents
         for (size_t i = 0; i < m_paths.size(); ++i) {
-            Path path = m_paths[i];
-            WriteVisitor v(this);
-            recursiveVisit(path, v, m_followLinks);
+            bpf::Path path = m_paths[i];
+            log(BP_DEBUG, "WriteVisitor(" + path.utf8()
+                + ", " + m_paths[i].utf8() + ")");
+            WriteVisitor v(this, m_paths[i]);
+            if (m_recurse && bpf::isDirectory(path)) {
+                recursiveVisit(path, v, m_followLinks);
+            } else {
+                visit(path, v, m_followLinks);
+            }
         }
         if (m_numAdded == 0) {
             throw string("no files were added to archive");
@@ -432,11 +468,11 @@ Archiver::archive(const Transaction& tran,
                       + ", archiveErr = " + archiveErr);
         tran.error("archiveError", msg.c_str());
 
-    } catch (const tFileSystemError& e) {
+    } catch (const bpf::tFileSystemError& e) {
         // a boost::filesystem exception
         string msg = "Archiver::archive(), catch boost::filesystem exception, path1: '" 
-                     + Path(e.path1()).utf8()
-                     +", path2: '" + Path(e.path2()).utf8()
+                     + bpf::Path(e.path1()).utf8()
+                     +", path2: '" + bpf::Path(e.path2()).utf8()
                      + "' (" + e.what() + ")";
         log(BP_ERROR, "Archiver: " + msg);
         tran.error("archiveError", msg.c_str());
@@ -449,11 +485,11 @@ void
 Archiver::unarchive(const Transaction& tran, 
                     const bplus::Map& args)
 {
-    tChar buf[32768];
+    bpf::tChar buf[32768];
     if (!::getcwd(buf, sizeof(buf))) {
         throw string("unable to getcwd");
     }
-    Path curDir(buf);
+    bpf::Path curDir(buf);
             
     try {
         reset();
@@ -463,7 +499,7 @@ Archiver::unarchive(const Transaction& tran,
         if (tmpDir.empty()) {
             throw string("no temp_dir in service context");
         }
-        m_tempDir = getTempPath(Path(tmpDir), "ArchiveService_");
+        m_tempDir = getTempPath(bpf::Path(tmpDir), "ArchiveService_");
         (void) bfs::create_directories(m_tempDir);
 
         // cd to tempdir, that's where archive will extract relative paths
@@ -478,8 +514,8 @@ Archiver::unarchive(const Transaction& tran,
         if (p == NULL) {
             throw string("file must contain a BPTPath");
         }
-        Path archivePath = pathFromURL((string)*p);
-        if (!bfs::is_regular_file(archivePath)) {
+        bpf::Path archivePath = bpf::pathFromURL((string)*p);
+        if (!isRegularFile(archivePath)) {
             throw string(archivePath.utf8() + " is not a regular file");
         }
 
@@ -517,10 +553,8 @@ Archiver::unarchive(const Transaction& tran,
         struct archive_entry* entry;
         while (archive_read_next_header(m_archive, &entry) == ARCHIVE_OK) {
             headerRead = true;
-            Path p = archive_entry_pathname(entry);
-#ifdef UNARCHIVE_EXPOSED
+            bpf::Path p = archive_entry_pathname(entry);
             checkSafety(m_tempDir, p);
-#endif
             int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_SECURE_SYMLINKS;
             if (archive_read_extract(m_archive, entry, flags)) {
                 throw string("unable to extract to " + p.utf8()
@@ -553,14 +587,14 @@ Archiver::unarchive(const Transaction& tran,
                       + ", archiveErr = " + archiveErr);
         tran.error("unarchiveError", msg.c_str());
 
-    } catch (const tFileSystemError& e) {
+    } catch (const bpf::tFileSystemError& e) {
         // a boost::filesystem exception
         if (!curDir.empty()) {
             (void)::chdir(curDir.string().c_str());
         }
         string msg = "Archiver::unarchive(), catch boost::filesystem exception, path1: '" 
-                     + Path(e.path1()).utf8()
-                     +", path2: '" + Path(e.path2()).utf8()
+                     + bpf::Path(e.path1()).utf8()
+                     +", path2: '" + bpf::Path(e.path2()).utf8()
                      + "' (" + e.what() + ")";
         log(BP_ERROR, "Archiver: " + msg);
         tran.error("unarchiveError", msg.c_str());
@@ -591,6 +625,43 @@ Archiver::reset()
 
 
 void
+Archiver::findAnchorPath()
+{
+    // We don't just use bpf::Path::relativeTo() since 
+    // it throws exceptions on failure, which will be
+    // common here.  Also, the ".parent_path().parent_path()"
+    // idiom is here since our path string is / terminated
+    assert(!m_paths.empty());
+    log(BP_DEBUG, "findAnchorPath: original parent = "
+        + bpf::Path(m_paths[0].parent_path()).utf8());
+    string baseStr = bpf::Path(m_paths[0].parent_path()).utf8();
+    if (baseStr.rfind("/") != baseStr.length()-1) {
+        baseStr += "/";
+    }
+    log(BP_DEBUG, "findAnchorPath: start with base " + baseStr);
+    for (size_t i = 1; i < m_paths.size(); ++i) {
+        string ourStr = m_paths[i].utf8();
+        if (ourStr.find(baseStr) != 0) {
+            // not a subpath, try baseStr's parent until it works
+            log(BP_DEBUG, "findAnchorPath: " + ourStr + " not a child of " + baseStr);
+            bool found = false;
+            while (!found && baseStr.compare("/")) {
+                bpf::Path parent = bpf::Path(baseStr).parent_path().parent_path();
+                baseStr = parent.utf8();
+                log(BP_DEBUG, "findAnchorPath: trying new parent " + baseStr);
+                if (baseStr.rfind("/") != baseStr.length()-1) {
+                    baseStr += "/";
+                }
+                found = ourStr.find(baseStr) == 0;
+            }
+        }
+    }
+    m_anchorPath = bpf::Path(baseStr).parent_path().parent_path();
+    log(BP_DEBUG, "findAnchorPath finds " + baseStr);
+}
+
+
+void
 Archiver::calculateTotalSize() 
 { 
     m_totalBytes = 0;
@@ -603,20 +674,20 @@ Archiver::calculateTotalSize()
 
 
 void
-Archiver::writeFile(const Path& fullPath,
-                    const Path& relativePath)
+Archiver::writeFile(const bpf::Path& fullPath,
+                    const bpf::Path& relativePath)
 {
     log(BP_DEBUG, "writefile(" + fullPath.utf8()
-                  + ", " + relativePath.utf8() + ")");
+        + ", " + relativePath.utf8() + ")");
     
     try {
-        if (bfs::is_other(fullPath)) {
+        if (bpf::isOther(fullPath)) {
             log(BP_DEBUG, "skipping non file/dir " + fullPath.utf8());
             return;
         }
         
-        bool isDir = bfs::is_directory(fullPath);
-        bool isSymlink = bfs::is_symlink(fullPath);
+        bool isDir = bpf::isDirectory(fullPath);
+        bool isSymlink = bpf::isSymlink(fullPath);
             
         // Stat the file.
         tStat s;
@@ -756,7 +827,7 @@ Archiver::writeFile(const Path& fullPath,
             archive_entry_free(ae);
             throw e;
         }
-    } catch (const tFileSystemError& e) {
+    } catch (const bpf::tFileSystemError& e) {
         string msg = "Archiver::writeFile(" + fullPath.utf8()
                       + ", " + relativePath.utf8() + "): " + e.what();
         log(BP_ERROR, msg);
@@ -804,7 +875,7 @@ Archiver::doSendProgress(boost::uintmax_t num,
 
 
 #ifdef UNARCHIVE_EXPOSED
-// we have to make sure that the file is safe for unarchiving.  
+// Make sure that a path / relativePath pair is safe.
 // Namely that:
 // - the path does not attempt to specify an absolute path
 // - the path name contains no stream references (Windows)
@@ -815,8 +886,8 @@ Archiver::doSendProgress(boost::uintmax_t num,
 // path is the pathname within the archive
 //
 void
-Archiver::checkSafety(const Path& destDir,
-                      const Path& path)
+Archiver::checkSafety(const bpf::Path& destDir,
+                      const bpf::Path& path)
 {
     // the path cannot be an absolute path
     if (!path.root_directory().empty()) {
@@ -832,13 +903,13 @@ Archiver::checkSafety(const Path& destDir,
     
     // Make sure the "canonicalized" path is a subdir of the destination dir 
     // [i.e. don't let a file "jump out" of the destination dir].
-    Path resolved = destDir / path;
+    bpf::Path resolved = destDir / path;
     resolved = resolved.canonical();
-    tString destDirPrefix = destDir.string() + nativeFromUtf8("/");
+    bpf::tString destDirPrefix = destDir.string() + bpf::nativeFromUtf8("/");
     if (resolved.string().find(destDirPrefix) != 0) {
         throw string(path.utf8() + " resolves outside of destination dir");
     }
-    if (bfs::is_other(resolved)) {
+    if (bpf::isOther(resolved)) {
         throw string(path.utf8() + " refers to a non file/dir/symlink");
     }
 }

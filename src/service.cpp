@@ -656,7 +656,12 @@ Archiver::findAnchorPath()
             }
         }
     }
+
+    // ok, we have our anchor.  make sure that at a minimum we use /
     m_anchorPath = bpf::Path(baseStr).parent_path().parent_path();
+    if (m_anchorPath.string().empty()) {
+        m_anchorPath = "/";
+    }
     log(BP_DEBUG, "findAnchorPath finds " + baseStr);
 }
 

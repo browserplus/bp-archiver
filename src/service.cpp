@@ -119,7 +119,10 @@ public:
 private:
     static void readProgressCB(void* cookie);
     void reset();
-    void findAnchorPath();
+    bool relativeTo(const bpf::Path& path,
+                    const bpf::Path& base,
+                    bpf::Path& relPath);
+    void findAnchorPath();  // throws std::string
     void calculateTotalSize();
     void writeFile(const bpf::Path& fullPath,
                    const bpf::Path& relativePath);
@@ -164,7 +167,8 @@ ADD_BP_METHOD(Archiver, archive,
               "Service returns a \"archiveFile\" filehandle for the "
               "resulting archive file.")
 ADD_BP_METHOD_ARG(archive, "files", List, true,
-                  "A list of filehandles to be archived.")
+                  "A list of filehandles to be archived.  The files "
+                  "must all be on the same root drive (e.g. c:).");
 ADD_BP_METHOD_ARG(archive, "format", String, true, 
                   "Archive format, one of 'zip', 'zip-uncompressed', 'tar', "
                   "'tar-gzip', or 'tar-bzip2'.  The archiveFileName "
@@ -297,7 +301,6 @@ Archiver::archive(const Transaction& tran,
             throw string("required files parameter missing");
         }
         for (unsigned int i = 0; i < fileList->size(); i++) {
-            const bplus::Map* m = dynamic_cast<const bplus::Map*>(fileList->value(i));
             const bplus::Path* uri = dynamic_cast<const bplus::Path*>(fileList->value(i));
             if (uri == NULL) {
                 throw string("files must contain BPTPaths");
@@ -624,45 +627,56 @@ Archiver::reset()
 }
 
 
-void
-Archiver::findAnchorPath()
+// a version of bpf::Path::relativeTo() which doesn't throw
+bool
+Archiver::relativeTo(const bpf::Path& path,
+                     const bpf::Path& base,
+                     bpf::Path& relPath)
 {
-    // We don't just use bpf::Path::relativeTo() since 
-    // it throws exceptions on failure, which will be
-    // common here.  Also, the ".parent_path().parent_path()"
-    // idiom is here since our path string is / terminated
-    assert(!m_paths.empty());
-    log(BP_DEBUG, "findAnchorPath: original parent = "
-        + bpf::Path(m_paths[0].parent_path()).utf8());
-    string baseStr = bpf::Path(m_paths[0].parent_path()).utf8();
+    if (base == path) {
+        relPath = bpf::Path();
+        return true;
+    }
+    string baseStr = base.utf8();
+    string ourStr = path.utf8();
     if (baseStr.rfind("/") != baseStr.length()-1) {
         baseStr += "/";
     }
-    log(BP_DEBUG, "findAnchorPath: start with base " + baseStr);
+    if (ourStr.find(baseStr) != 0) {
+        return false;
+    }
+    bpf::tString relStr = bpf::nativeFromUtf8(ourStr.substr(baseStr.length(),
+                                                            string::npos));
+    relPath = relStr;
+    return true;
+}
+
+
+void
+Archiver::findAnchorPath()
+{
+    assert(!m_paths.empty());
+    bpf::tString root = m_paths[0].root_name();
+    m_anchorPath = m_paths[0].parent_path();
+    log(BP_DEBUG, "findAnchorPath: start with m_anchorPath "
+        + m_anchorPath.utf8());
     for (size_t i = 1; i < m_paths.size(); ++i) {
-        string ourStr = m_paths[i].utf8();
-        if (ourStr.find(baseStr) != 0) {
-            // not a subpath, try baseStr's parent until it works
-            log(BP_DEBUG, "findAnchorPath: " + ourStr + " not a child of " + baseStr);
+        if (root != m_paths[i].root_name()) {
+            throw string("selection cannot span root drives");
+        }
+        bpf::Path junk;
+        if (!relativeTo(m_paths[i], m_anchorPath, junk)) {
+            log(BP_DEBUG, "findAnchorPath: " + m_paths[i].utf8()
+                + " not a child of " + m_anchorPath.utf8());
             bool found = false;
-            while (!found && baseStr.compare("/")) {
-                bpf::Path parent = bpf::Path(baseStr).parent_path().parent_path();
-                baseStr = parent.utf8();
-                log(BP_DEBUG, "findAnchorPath: trying new parent " + baseStr);
-                if (baseStr.rfind("/") != baseStr.length()-1) {
-                    baseStr += "/";
-                }
-                found = ourStr.find(baseStr) == 0;
+            bpf::Path root("/");
+            while (!found && m_anchorPath != root) {
+                m_anchorPath = m_anchorPath.parent_path();
+                found = relativeTo(m_paths[i], m_anchorPath, junk);
             }
         }
     }
-
-    // ok, we have our anchor.  make sure that at a minimum we use /
-    m_anchorPath = bpf::Path(baseStr).parent_path().parent_path();
-    if (m_anchorPath.string().empty()) {
-        m_anchorPath = "/";
-    }
-    log(BP_DEBUG, "findAnchorPath finds " + baseStr);
+    log(BP_DEBUG, "findAnchorPath finds " + m_anchorPath.utf8());
 }
 
 

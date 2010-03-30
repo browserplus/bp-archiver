@@ -527,7 +527,7 @@ Archiver::unarchive(const Transaction& tran,
             dynamic_cast<const bplus::CallBack*>(args.value("progressCallback"));
         if (cb) {
             m_progressCallback = new Callback(tran, *cb);
-            m_totalBytes = bfs::file_size(archivePath);
+            m_totalBytes = bpf::size(archivePath);
         }
         
         // time to extract
@@ -762,7 +762,7 @@ Archiver::writeFile(const bpf::Path& fullPath,
                 archive_entry_set_size(ae, 0);
             } else {
                 archive_entry_set_filetype(ae, AE_IFREG);
-                archive_entry_set_size(ae, bfs::file_size(fullPath));
+                archive_entry_set_size(ae, bpf::size(fullPath));
             }
 #else
             archive_entry_copy_stat(ae, &s);

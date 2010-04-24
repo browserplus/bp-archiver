@@ -60,10 +60,6 @@ IF (NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE "Debug")
 ENDIF ()
 
-# we use the bakery for external, which uses debug/release.  cmake
-# uses Debug/Release, so convert case
-STRING(TOLOWER "${CMAKE_BUILD_TYPE}" BUILD_TYPE)
-
 INCLUDE_DIRECTORIES(
   "${CMAKE_CURRENT_SOURCE_DIR}/../external/build/include"
   "${frameworkDir}/include"
@@ -71,7 +67,7 @@ INCLUDE_DIRECTORIES(
  
 LINK_DIRECTORIES(
   "${CMAKE_CURRENT_SOURCE_DIR}/../external/build/lib"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../external/build/lib/${BUILD_TYPE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../external/build/lib/${CMAKE_BUILD_TYPE}"
 )
  
 SET(SRCS service.cpp)
@@ -89,7 +85,7 @@ ADD_CUSTOM_TARGET(
 #
 IF (CMAKE_CFG_INTDIR STREQUAL "." OR CMAKE_CFG_INTDIR STREQUAL "/")
    # using a single configuration generator
-   SET(LINK_SUBDIR "${BUILD_TYPE}")
+   SET(LINK_SUBDIR "${CMAKE_BUILD_TYPE}")
 ELSE ()
    # using a multiple configuration generator
    # vs and xcode append a build type
@@ -135,7 +131,7 @@ ADD_CUSTOM_COMMAND(TARGET ${serviceName} POST_BUILD
 
 # strip non-debug unix/osx builds
 IF (NOT WIN32)
-    IF (NOT ${BUILD_TYPE} STREQUAL "debug")
+    IF (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
        ADD_CUSTOM_COMMAND(TARGET ${serviceName} POST_BUILD
                           COMMAND cmake -E echo "stripping \"${outputDir}/${ServiceLibrary}\""
                           COMMAND strip -x \"${outputDir}/${ServiceLibrary}\")

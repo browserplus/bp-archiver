@@ -8,7 +8,7 @@ require "bakery/ports/bakery"
 topDir = File.dirname(File.expand_path(__FILE__));
 $order = {
   :output_dir => File.join(topDir, "build"),
-  :packages => ["zlib", "bzip2", "libarchive", "boost", "bp-file"],
+  :packages => ["openssl", "zlib", "bzip2", "libarchive", "boost", "bp-file"],
   :verbose => true,
   :use_source => {
         "bp-file"=>File.join(topDir, "bp-file")

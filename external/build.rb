@@ -7,8 +7,16 @@ require "bakery/ports/bakery"
 # libarchive will be put into ports/archivers/libarchive when 2.8.0 is released
 topDir = File.dirname(File.expand_path(__FILE__));
 $order = {
-  :output_dir => File.join(topDir, "build"),
-  :packages => ["openssl", "zlib", "bzip2", "libarchive", "boost", "bp-file"],
+  :output_dir => File.join(topDir, "dist"),
+  :packages => [
+                "openssl",
+                "zlib",
+                "bzip2",
+                "libarchive",
+                "boost",
+                "bp-file",
+                "service_testing"
+                ],
   :verbose => true,
   :use_source => {
         "bp-file"=>File.join(topDir, "bp-file")

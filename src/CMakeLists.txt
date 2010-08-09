@@ -1,6 +1,6 @@
 #####
-# A CMake build file for the Tar service, a service that can
-# tar/untar files and directories
+# A CMake build file for the Archiver service, a service that can
+# tar/untar files and directories.
 # 
 # Copyright 2009, Yahoo!
 # 
@@ -35,7 +35,7 @@
 # Original Author: Gordon Durand
 #####
 
-cmake_minimum_required(VERSION 2.6)
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8.1)
 
 IF (APPLE)
    SET (CMAKE_OSX_DEPLOYMENT_TARGET "10.4"

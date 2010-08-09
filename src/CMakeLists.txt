@@ -39,11 +39,8 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.8.1)
 
 INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/../external/bp-service-framework/build_support/BuildConfigs.cmake)
 
-SET(serviceName Archiver)
-
-PROJECT(${serviceName}Service)
-
-SET(outputDir "${CMAKE_CURRENT_BINARY_DIR}/${serviceName}")
+SET(SERVICE_NAME "Archiver")
+PROJECT(${SERVICE_NAME}Service)
 
 INCLUDE_DIRECTORIES(
   "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/include"
@@ -54,40 +51,14 @@ LINK_DIRECTORIES(
   "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib"
   "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib/${CMAKE_BUILD_TYPE}"
 )
- 
-SET(SRCS service.cpp)
 
-# Pre-build step, build our externals
-#
-ADD_CUSTOM_TARGET(
-    ${serviceName}Externals ALL
-    COMMAND ruby build.rb
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../external"
-    COMMENT Building externals...)
-
-# Alas, trying to test CMAKE_CONFIGURATION_TYPES doesn't work,
-# it returns "Debug;Release" even for a single config generator
-#
-IF (CMAKE_CFG_INTDIR STREQUAL "." OR CMAKE_CFG_INTDIR STREQUAL "/")
-   # using a single configuration generator
-   SET(LINK_SUBDIR "${CMAKE_BUILD_TYPE}")
-ELSE ()
-   # using a multiple configuration generator
-   # vs and xcode append a build type
-   SET(LINK_SUBDIR "")
-ENDIF ()
-
-# boost libs
-#
+# Boost libs.
 IF (WIN32)
    # Visual Studio does some autolink magic with boost, no need
    # to specify library
 ELSE ()
    SET(BOOST_LIBS "boost_filesystem" "boost_system")
 ENDIF ()
-
-ADD_LIBRARY(${serviceName} MODULE ${HDRS} ${SRCS})
-
 SET(OS_LIBS)
 IF (APPLE)
    # need carbon headers and library
@@ -95,31 +66,9 @@ IF (APPLE)
    MARK_AS_ADVANCED(CARBON_LIBRARY)
    SET(OS_LIBS ${CARBON_LIBRARY})
 ENDIF() 
+SET(SRCS service.cpp)
+SET(HDRS "")
+SET(LIBS bpfile_s ${BOOST_LIBS} archive_s zlib_s bz2_s ${OS_LIBS})
 
-TARGET_LINK_LIBRARIES(${serviceName} bpfile_s ${BOOST_LIBS} archive_s zlib_s bz2_s ${OS_LIBS})
-
-ADD_DEPENDENCIES(${serviceName} ${serviceName}Externals)
-
-# create service dir
-#
-FILE(MAKE_DIRECTORY ${outputDir})
-
-# copy in manifest
-#
-GET_TARGET_PROPERTY(loc ${serviceName} LOCATION)
-GET_FILENAME_COMPONENT(ServiceLibrary "${loc}" NAME)
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/manifest.json"
-               "${outputDir}/manifest.json")  
-ADD_CUSTOM_COMMAND(TARGET ${serviceName} POST_BUILD
-                   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                           \"${loc}\" \"${outputDir}\")
-
-# strip non-debug unix/osx builds
-IF (NOT WIN32)
-    IF (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-       ADD_CUSTOM_COMMAND(TARGET ${serviceName} POST_BUILD
-                          COMMAND cmake -E echo "stripping \"${outputDir}/${ServiceLibrary}\""
-                          COMMAND strip -x \"${outputDir}/${ServiceLibrary}\")
-    ENDIF ()
-ENDIF ()
+BPAddCppService()
 

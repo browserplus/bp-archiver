@@ -46,11 +46,18 @@ INCLUDE_DIRECTORIES(
   "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/../external/bp-service-framework/include"
 )
- 
-LINK_DIRECTORIES(
-  "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib/${CMAKE_BUILD_TYPE}"
-)
+
+IF ("${CMAKE_BUILD_TYPE}" STREQUAL "CodeCoverage")
+  LINK_DIRECTORIES(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib/Debug"
+  )
+ELSE ()
+  LINK_DIRECTORIES(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../external/dist/lib/${CMAKE_BUILD_TYPE}"
+  )
+ENDIF ()
 
 # Boost libs.
 IF (WIN32)

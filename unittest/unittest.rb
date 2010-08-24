@@ -66,7 +66,7 @@ class TestArchiver < Test::Unit::TestCase
 #        got = zipfile.read("test_directory_1/bar3.txt")
 #        assert_equal(want, got)
 #      }
-      File.delete(output['archiveFile'])
+#      File.delete(output['archiveFile'])
     }
   end
 

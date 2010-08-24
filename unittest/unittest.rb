@@ -146,7 +146,7 @@ class TestArchiver < Test::Unit::TestCase
 # NEEDSWORK!!  DISABLED UNTIL WE FIGURE OUT HOW TO VALIDATE WITHOUT GEMS
 #      #Tar.bzopen(@output['archiveFile'], File::RDONLY, 0644, Tar::GNU | Tar::VERBOSE) do |tar|
 #      #end
-      File.delete(output['archiveFile'])
+#      File.delete(output['archiveFile'])
     }
   end
 end

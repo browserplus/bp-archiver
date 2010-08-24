@@ -8,6 +8,16 @@ require 'open-uri'
 require 'rbconfig'
 include Config
 
+# NEEDSWORK!!  DISABLED UNTIL WE FIGURE OUT HOW TO VALIDATE WITHOUT GEMS
+# Neil (ndmanvar) wrote this test using gems:
+# rubyzip gem
+# tarruby gem
+#require 'rubygems'
+#require 'zip/zip'
+#require 'zip/ZipFileSystem'
+#require 'archive/tar/minitar'
+#require 'tarruby'
+
 class TestArchiver < Test::Unit::TestCase
   def setup
     subdir = 'build/Archiver'
@@ -16,6 +26,12 @@ class TestArchiver < Test::Unit::TestCase
     end
     @cwd = File.dirname(File.expand_path(__FILE__))
     @service = File.join(@cwd, "../#{subdir}")
+    @path1 = @cwd + "/test_files/"
+    @path_testdir = @path1 + "test_directory/"
+    @path_testdir_noP = @path1 + "test_directory"
+    @path_testdir1 = @path1 + "test_directory/test_directory_1/"
+    @test_directory = "path://" + @path1 + "test_directory/"
+    @test_directory_1 = "path://" + @path1 + "test_directory/test_directory_1"
   end
   
   def teardown
@@ -23,6 +39,113 @@ class TestArchiver < Test::Unit::TestCase
 
   def test_load_service
     BrowserPlus.run(@service) { |s|
+    }
+  end
+
+  # BrowserPlus.Archiver.archive({params}, function{}())
+  # Lets you archive and optionally compress files and directories.
+  # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
+  def test_zip_one_file
+    BrowserPlus.run(@service) { |s|
+      # One directory - zip.
+      output = s.archive({ 'files' => [@test_directory_1], 'format' => 'zip', 'recurse' => false })
+
+# NEEDSWORK!!  DISABLED UNTIL WE FIGURE OUT HOW TO VALIDATE WITHOUT GEMS
+#      # Open zip, compare files name/contents to original.
+#      Zip::ZipFile.open(output['archiveFile']) { |zipfile|
+#        want = File.open(@path_testdir1 + "/bar1.txt", "rb") { |f| f.read }
+#        got = zipfile.read("test_directory_1/bar1.txt")
+#        assert_equal(want, got)
+#
+#        want = File.open(@path_testdir1 + "/bar2.txt", "rb") { |f| f.read }
+#        got = zipfile.read("test_directory_1/bar2.txt")
+#        assert_equal(want, got)
+#
+#        want = File.open(@path_testdir1 + "/bar3.txt", "rb") { |f| f.read }
+#        got = zipfile.read("test_directory_1/bar3.txt")
+#        assert_equal(want, got)
+#      }
+      File.delete(output['archiveFile'])
+    }
+  end
+
+  # BrowserPlus.Archiver.archive({params}, function{}())
+  # Lets you archive and optionally compress files and directories.
+  # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
+  def test_zip_two_file
+    BrowserPlus.run(@service) { |s|
+      # Two files - zip.
+      output = s.archive({ 'files' => [@test_directory_1 + "/bar1.txt", @test_directory_1 + "/bar2.txt"], 'format' => 'zip', 'recurse' => false })
+
+# NEEDSWORK!!  DISABLED UNTIL WE FIGURE OUT HOW TO VALIDATE WITHOUT GEMS
+#      # Open zip, compare files name/contents to original.
+#      Zip::ZipFile.open(output['archiveFile']) { |zipfile|
+#        want = File.open(@path_testdir1 + "/bar1.txt", "rb") { |f| f.read }
+#        got = zipfile.read("bar1.txt")
+#        assert_equal(want, got)
+#
+#        want = File.open(@path_testdir1 + "/bar2.txt", "rb") { |f| f.read }
+#        got = zipfile.read("bar2.txt")
+#        assert_equal(want, got)
+#      }
+#      File.delete(output['archiveFile'])
+#
+#      # Still need to add test cases that test: followLinks, recurse, progressCallback.
+#      output = s.archive({ 'files' => [@test_directory], 'format' => 'zip', 'recurse' => true })
+#
+#      Zip::ZipFile.open(output['archiveFile']) { |zipfile|
+#        q = zipfile.read("test_directory/test_directory_1/bar1.txt")
+#      }
+      File.delete(output['archiveFile'])
+    }
+  end
+
+  # Still working on tar.
+  # BrowserPlus.Archiver.archive({params}, function{}())
+  # Lets you archive and optionally compress files and directories.
+  # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
+  def test_tar
+    BrowserPlus.run(@service) { |s|
+      output = s.archive({ 'files' => [@test_directory_1], 'format' => 'tar' , 'recurse' => false })
+
+# NEEDSWORK!!  DISABLED UNTIL WE FIGURE OUT HOW TO VALIDATE WITHOUT GEMS
+#      Tar.open(output['archiveFile'], File::RDONLY, 0644, Tar::GNU | Tar::VERBOSE) do |tar|
+#        # Or 'tar.each do ...'
+#        while tar.read
+#          # Regular file.
+#          if tar.reg? && tar.pathname != "test_directory_1/.DS_Store"
+#            tar.extract_file('test')
+#            want = File.read(File.join(@path_testdir, tar.pathname))
+#            got = File.read('test')
+#            # Asserting bar1,2,3 from tar file is same as original bar1,2,3.
+#            assert_equal(want, got)
+#          end
+#        end
+#
+#        # If extract all files.
+#        #tar.extract_all
+#      end
+#
+#      # For gzip archive.
+#      #Tar.gzopen('foo.tar.gz', ...
+#
+#      # For bzip2 archive.
+#      #Tar.bzopen('foo.tar.bz2', ...
+      File.delete(output['archiveFile'])
+    }
+  end
+
+  # BrowserPlus.Archiver.archive({params}, function{}())
+  # Lets you archive and optionally compress files and directories.
+  # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
+  def test_gzip
+    BrowserPlus.run(@service) { |s|
+      output = s.archive({ 'files' => [@test_directory_1], 'format' => 'tar-bzip2' , 'recurse' => false })
+
+# NEEDSWORK!!  DISABLED UNTIL WE FIGURE OUT HOW TO VALIDATE WITHOUT GEMS
+#      #Tar.bzopen(@output['archiveFile'], File::RDONLY, 0644, Tar::GNU | Tar::VERBOSE) do |tar|
+#      #end
+      File.delete(output['archiveFile'])
     }
   end
 end

@@ -26,6 +26,7 @@ class TestArchiver < Test::Unit::TestCase
     end
     @cwd = File.dirname(File.expand_path(__FILE__))
     @service = File.join(@cwd, "../#{subdir}")
+    @providerDir = File.expand_path(File.join(@cwd, "providerDir"))
     @path1 = @cwd + "/test_files/"
     @path_testdir = @path1 + "test_directory/"
     @path_testdir_noP = @path1 + "test_directory"
@@ -38,7 +39,7 @@ class TestArchiver < Test::Unit::TestCase
   end
 
   def test_load_service
-    BrowserPlus.run(@service) { |s|
+    BrowserPlus.run(@service, @providerDir) { |s|
     }
   end
 
@@ -46,7 +47,7 @@ class TestArchiver < Test::Unit::TestCase
   # Lets you archive and optionally compress files and directories.
   # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
   def test_zip_one_file
-    BrowserPlus.run(@service) { |s|
+    BrowserPlus.run(@service, @providerDir) { |s|
       # One directory - zip.
 # NEEDSWORK!!  FAILS ON CODE COVERAGE!!
 #      output = s.archive({ 'files' => [@test_directory_1], 'format' => 'zip', 'recurse' => false })
@@ -74,7 +75,7 @@ class TestArchiver < Test::Unit::TestCase
   # Lets you archive and optionally compress files and directories.
   # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
   def test_zip_two_file
-    BrowserPlus.run(@service) { |s|
+    BrowserPlus.run(@service, @providerDir) { |s|
       # Two files - zip.
 # NEEDSWORK!!  FAILS ON CODE COVERAGE!!
 #      output = s.archive({ 'files' => [@test_directory_1 + "/bar1.txt", @test_directory_1 + "/bar2.txt"], 'format' => 'zip', 'recurse' => false })
@@ -107,7 +108,7 @@ class TestArchiver < Test::Unit::TestCase
   # Lets you archive and optionally compress files and directories.
   # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
   def test_tar
-    BrowserPlus.run(@service) { |s|
+    BrowserPlus.run(@service, @providerDir) { |s|
 # NEEDSWORK!!  FAILS ON CODE COVERAGE!!
 #      output = s.archive({ 'files' => [@test_directory_1], 'format' => 'tar' , 'recurse' => false })
 
@@ -142,7 +143,7 @@ class TestArchiver < Test::Unit::TestCase
   # Lets you archive and optionally compress files and directories.
   # (avaliable formats are zip, zip (uncompressed), tar, tar.gx, and tar.bz2)
   def test_gzip
-    BrowserPlus.run(@service) { |s|
+    BrowserPlus.run(@service, @providerDir) { |s|
 # NEEDSWORK!!  FAILS ON WINDOWS!!
 #      output = s.archive({ 'files' => [@test_directory_1], 'format' => 'tar-bzip2' , 'recurse' => false })
 

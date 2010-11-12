@@ -2,7 +2,7 @@ This repo can be used to build the BrowserPlus archiver service.
 This service uses libarchive and supports creating zip, uncompressed zip,
 tar, gzipped tar, and bzipped tar archives.
 
-This service uses submodules lloyd/bakery, browserplus/bp-file, 
+This service uses submodules browserplus/bakery, browserplus/bp-file, 
 and browserplus/bp-service-framework.
  
 Instructions to build the service are in the file BUILDING.

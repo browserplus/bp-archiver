@@ -782,7 +782,7 @@ Archiver::writeFile(const bfs::path& fullPath,
 #endif
 
 #ifdef WIN32
-            archive_entry_copy_pathname_w(ae, relativePath.string().c_str());
+            archive_entry_copy_pathname_w(ae, relativePath.wstring().c_str());
 #else
             archive_entry_set_pathname(ae, relativePath.string().c_str());
 #endif

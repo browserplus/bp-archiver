@@ -348,11 +348,17 @@ Archiver::archive(const Transaction& tran,
         } else if (format == "tar-gzip") {
             m_canArchiveSymlinks = true;
             compression = eGZip;
-            m_archivePath.replace_extension(".tar.gz");
+            m_archivePath.replace_extension("");
+            string s = m_archivePath.string();
+            s += ".tar.gz";
+            m_archivePath = s;
         } else if (format == "tar-bzip2") {
             m_canArchiveSymlinks = true;
             compression = eBZip2;
-            m_archivePath.replace_extension(".tar.bz2");
+            m_archivePath.replace_extension("");
+            string s = m_archivePath.string();
+            s += ".tar.bz2";
+            m_archivePath = s;
         } else {
             throw string("invalid format parameter");
         }
@@ -421,7 +427,8 @@ Archiver::archive(const Transaction& tran,
         }
 
         // now open up the archive
-        if (archive_write_open_filename(m_archive, m_archivePath.string().c_str())) {
+        if (archive_write_open_filename(m_archive,
+                                        m_archivePath.generic_string().c_str())) {
             throw string("unable to open archive file '" + m_archivePath.string() + "'");
         }
         
@@ -457,7 +464,8 @@ Archiver::archive(const Transaction& tran,
         // return success
         bplus::Map results;
         results.add("success", new bplus::Bool(true));
-        results.add("archiveFile", new bplus::Path(m_archivePath.string()));
+        results.add("archiveFile",
+                    new bplus::Path(bpf::nativeUtf8String(m_archivePath)));
         tran.complete(results);
         
     } catch (const string& msg) {
@@ -502,7 +510,7 @@ Archiver::unarchive(const Transaction& tran,
         (void) bfs::create_directories(m_tempDir);
 
         // cd to tempdir, that's where archive will extract relative paths
-        if (::chdir(m_tempDir.string().c_str())) {
+        if (::chdir(nativeString(m_tempDir).c_str())) {
             throw string("unable to chdir to " + m_tempDir.string());
         }
 
@@ -541,7 +549,9 @@ Archiver::unarchive(const Transaction& tran,
         archive_read_support_format_zip(m_archive);
         archive_read_support_compression_all(m_archive);
 
-        if (archive_read_open_filename(m_archive, archivePath.string().c_str(), ARCHIVE_BUF_SIZE)) {
+        if (archive_read_open_filename(m_archive,
+                                       archivePath.generic_string().c_str(),
+                                       ARCHIVE_BUF_SIZE)) {
             throw string("unable to open archive: " + archivePath.string());
         }
         if (cb) {
@@ -566,20 +576,21 @@ Archiver::unarchive(const Transaction& tran,
         }
 
         // cd back to starting dir
-        if (::chdir(curDir.string().c_str())) {
+        if (::chdir(nativeString(curDir).c_str())) {
             throw string("unable to chdir to " + curDir.string());
         }
 
         // return success
         bplus::Map results;
         results.add("success", new bplus::Bool(true));
-        results.add("archiveDir", new bplus::Path(m_tempDir.string()));
+        results.add("archiveDir",
+                    new bplus::Path(bpf::nativeUtf8String(m_tempDir)));
         tran.complete(results);
 
     } catch (const string& msg) {
         // one of our exceptions
         if (!curDir.empty()) {
-            (void)::chdir(curDir.string().c_str());
+            (void)::chdir(nativeString(curDir).c_str());
         }
         string archiveErr = m_archive ? archive_error_string(m_archive) : "";
         log(BP_DEBUG, "Archiver::unarchive(), catch " + msg
@@ -589,7 +600,7 @@ Archiver::unarchive(const Transaction& tran,
     } catch (const bfs::filesystem_error& e) {
         // a boost::filesystem exception
         if (!curDir.empty()) {
-            (void)::chdir(curDir.string().c_str());
+            (void)::chdir(nativeString(curDir).c_str());
         }
         string msg = "Archiver::unarchive(), catch boost::filesystem exception, path1: '" 
                      + e.path1().string()
@@ -782,9 +793,9 @@ Archiver::writeFile(const bfs::path& fullPath,
 #endif
 
 #ifdef WIN32
-            archive_entry_copy_pathname_w(ae, relativePath.wstring().c_str());
+            archive_entry_copy_pathname_w(ae, relativePath.generic_wstring().c_str());
 #else
-            archive_entry_set_pathname(ae, relativePath.string().c_str());
+            archive_entry_set_pathname(ae, relativePath.generic_string().c_str());
 #endif
 
             if (archive_write_header(m_archive, ae) != 0) {
@@ -910,7 +921,7 @@ Archiver::checkSafety(const bfs::path& destDir,
     
 #ifdef WIN32
     // the name in the zip can not contain any stream references
-    if (path.relative_path().string().find(L":") != string::npos) {
+    if (path.relative_path().string().find(":") != string::npos) {
         throw string(path.string() + " contains a stream reference");
     }
 #endif
@@ -919,8 +930,8 @@ Archiver::checkSafety(const bfs::path& destDir,
     // [i.e. don't let a file "jump out" of the destination dir].
     bfs::path resolved = destDir / path;
     resolved = resolved.canonical();
-    string destDirPrefix = destDir.string() + "/";
-    if (resolved.string().find(destDirPrefix) != 0) {
+    string destDirPrefix = destDir.generic_string() + "/";
+    if (resolved.generic_string().find(destDirPrefix) != 0) {
         throw string(path.string() + " resolves outside of destination dir");
     }
     if (bpf::isOther(resolved)) {

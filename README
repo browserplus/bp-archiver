@@ -6,4 +6,3 @@ This service uses submodules browserplus/bakery, browserplus/bp-file,
 and browserplus/bp-service-framework.
  
 Instructions to build the service are in the file BUILDING.
-

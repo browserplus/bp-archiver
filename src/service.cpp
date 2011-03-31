@@ -818,7 +818,7 @@ Archiver::writeFile(const bfs::path& fullPath,
                     }
                     for (;;) {
                         fstream.read((char*)buf, ARCHIVE_BUF_SIZE);
-                        size_t rd = fstream.gcount();
+                        size_t rd = (size_t) fstream.gcount();
                         if (rd > 0) {
                             size_t wt = archive_write_data(m_archive,
                                                            (void*)buf, rd);

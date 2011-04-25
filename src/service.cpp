@@ -284,7 +284,7 @@ Archiver::archive(const Transaction& tran,
         reset();
 
         // get our temp dir where archive will be created
-        bplus::tPathString tmpDir = tempDir();
+        string tmpDir = tempDir();
         if (tmpDir.empty()) {
             throw string("no temp_dir in service context");
         }
@@ -502,7 +502,7 @@ Archiver::unarchive(const Transaction& tran,
         reset();
 
         // get our temp dir where archive will be extracted
-        bplus::tPathString tmpDir = tempDir();
+        string tmpDir = tempDir();
         if (tmpDir.empty()) {
             throw string("no temp_dir in service context");
         }

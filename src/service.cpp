@@ -284,7 +284,8 @@ Archiver::archive(const Transaction& tran,
         reset();
 
         // get our temp dir where archive will be created
-        tPathString tmpDir = tempDir();
+        //tPathString tmpDir = tempDir();
+        string tmpDir = context("temp_dir");
         if (tmpDir.empty()) {
             throw string("no temp_dir in service context");
         }
@@ -502,7 +503,8 @@ Archiver::unarchive(const Transaction& tran,
         reset();
 
         // get our temp dir where archive will be extracted
-        tPathString tmpDir = tempDir();
+        //tPathString tmpDir = tempDir();
+        string tmpDir = context("temp_dir");
         if (tmpDir.empty()) {
             throw string("no temp_dir in service context");
         }

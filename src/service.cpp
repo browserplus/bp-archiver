@@ -151,11 +151,11 @@ private:
 };
 
 #ifdef UNARCHIVE_EXPOSED
-BP_SERVICE_DESC(Archiver, "Archiver", "1.1.2",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.2.0",
                 "Lets you archive (and compress) / unarchive files "
                 "and directories.")
 #else
-BP_SERVICE_DESC(Archiver, "Archiver", "1.1.2",
+BP_SERVICE_DESC(Archiver, "Archiver", "1.2.0",
                 "Lets you archive and optionally compress files "
                 "and directories.")
 #endif
@@ -284,8 +284,7 @@ Archiver::archive(const Transaction& tran,
         reset();
 
         // get our temp dir where archive will be created
-        //tPathString tmpDir = tempDir();
-        string tmpDir = context("temp_dir");
+        bplus::tPathString tmpDir = tempDir();
         if (tmpDir.empty()) {
             throw string("no temp_dir in service context");
         }
@@ -300,11 +299,11 @@ Archiver::archive(const Transaction& tran,
             throw string("required files parameter missing");
         }
         for (unsigned int i = 0; i < fileList->size(); i++) {
-            const bplus::Path* uri = dynamic_cast<const bplus::Path*>(fileList->value(i));
-            if (uri == NULL) {
+            const bplus::Path* bpPath = dynamic_cast<const bplus::Path*>(fileList->value(i));
+            if (bpPath == NULL) {
                 throw string("files must contain BPTPaths");
             }
-            bfs::path thisPath = bpf::pathFromURL((string)*uri);
+            bfs::path thisPath((bplus::tPathString)*bpPath);
             m_paths.push_back(thisPath);
         }
         if (m_paths.empty()) {
@@ -466,7 +465,7 @@ Archiver::archive(const Transaction& tran,
         bplus::Map results;
         results.add("success", new bplus::Bool(true));
         results.add("archiveFile",
-                    new bplus::Path(bpf::nativeUtf8String(m_archivePath)));
+                    new bplus::Path(bpf::nativeString(m_archivePath)));
         tran.complete(results);
         
     } catch (const string& msg) {
@@ -523,7 +522,7 @@ Archiver::unarchive(const Transaction& tran,
         if (p == NULL) {
             throw string("file must contain a BPTPath");
         }
-        bfs::path archivePath = bpf::pathFromURL((string)*p);
+        bfs::path archivePath((bplus::tPathString)*p);
         if (!isRegularFile(archivePath)) {
             throw string(archivePath.string() + " is not a regular file");
         }
@@ -586,7 +585,7 @@ Archiver::unarchive(const Transaction& tran,
         bplus::Map results;
         results.add("success", new bplus::Bool(true));
         results.add("archiveDir",
-                    new bplus::Path(bpf::nativeUtf8String(m_tempDir)));
+                    new bplus::Path(bpf::nativeString(m_tempDir)));
         tran.complete(results);
 
     } catch (const string& msg) {

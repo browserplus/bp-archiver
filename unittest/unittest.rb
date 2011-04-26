@@ -31,8 +31,8 @@ class TestArchiver < Test::Unit::TestCase
     @path_testdir = @path1 + "test_directory/"
     @path_testdir_noP = @path1 + "test_directory"
     @path_testdir1 = @path1 + "test_directory/test_directory_1/"
-    @test_directory = "path://" + @path1 + "test_directory/"
-    @test_directory_1 = "path://" + @path1 + "test_directory/test_directory_1"
+    @test_directory = "path:" + @path1 + "test_directory/"
+    @test_directory_1 = "path:" + @path1 + "test_directory/test_directory_1"
   end
   
   def teardown
